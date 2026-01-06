@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.npm
+.git
+.gitignore
+Dockerfile*
+docker-compose*.yml
+logs
+log
+coverage
+.DS_Store
+*.md
+/boot/efi
+/etc
+/dev

@@ -1,0 +1,97 @@
+const authService = require("../services/authService");
+const logger = require("../utils/logger");
+
+async function register(req, res) {
+  const { name, email, password } = req.body || {};
+  if (!email || !password)
+    return res.status(400).json({ error: "email and password are required" });
+  try {
+    const result = await authService.registerUser({ name, email, password });
+    req.session.userId = result.id.toString();
+    req.session.email = email;
+    // if registration includes a role (e.g., seeded admin) keep it, otherwise default handled at creation
+    req.session.role = result.role || "user";
+    logger.info("New user registered (controller): %s", email);
+    req.session.save((err) => {
+      if (err) {
+        logger.error(
+          "Error saving session after register (controller) %s: %o",
+          email,
+          err
+        );
+        return res.status(500).json({ error: "could not establish session" });
+      }
+      return res.status(201).json(result);
+    });
+  } catch (err) {
+    if (err.message === "UserExists")
+      return res.status(409).json({ error: "User already exists" });
+    logger.error("Register controller error for %s: %o", email, err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+async function login(req, res) {
+  const { email, password } = req.body || {};
+  if (!email || !password)
+    return res.status(400).json({ error: "email and password are required" });
+  try {
+    const user = await authService.authenticateUser({ email, password });
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    req.session.userId = user._id.toString();
+    req.session.email = user.email;
+    req.session.role = user.role || "user";
+    logger.info("User logged in (controller): %s", user.email);
+    req.session.save((err) => {
+      if (err) {
+        logger.error(
+          "Error saving session after login (controller) %s: %o",
+          user.email,
+          err
+        );
+        return res.status(500).json({ error: "could not establish session" });
+      }
+      return res.json({ message: "Logged in" });
+    });
+  } catch (err) {
+    logger.error("Login controller error for %s: %o", email, err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+function logout(req, res) {
+  const userEmail = req.session?.email;
+  req.session.destroy((err) => {
+    if (err) {
+      logger.error(
+        "Error during logout (controller) for %s: %o",
+        userEmail || "unknown",
+        err
+      );
+      return res.status(500).json({ error: "Could not log out" });
+    }
+    res.clearCookie("connect.sid");
+    logger.info("User logged out (controller): %s", userEmail || "unknown");
+    return res.json({ message: "Logged out" });
+  });
+}
+
+async function me(req, res) {
+  if (!req.session || !req.session.userId)
+    return res.status(401).json({ error: "Not authenticated" });
+  try {
+    const user = await authService.getUserByEmail(req.session.email);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const { password, ...rest } = user;
+    return res.json({ user: rest });
+  } catch (err) {
+    logger.error(
+      "Me controller error for %s: %o",
+      req.session?.email || "unknown",
+      err
+    );
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+module.exports = { register, login, logout, me };
