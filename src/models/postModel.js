@@ -1,167 +1,194 @@
-const { connect } = require("../config/dbConnection");
-const { ObjectId } = require("mongodb");
+const { supabase } = require("../config/supabaseClient");
 
+/**
+ * createPost({ userId, content, mediaUrl, ai })
+ * Mongo returned insertOne result. Here we return the created row, plus insertedId to stay compatible.
+ */
 async function createPost({ userId, content, mediaUrl, ai }) {
-  const { client, db } = await connect("write");
-  try {
-    const posts = db.collection("posts");
-    const result = await posts.insertOne({
-      userId: new ObjectId(userId),
-      content: content || "",
-      mediaUrl: mediaUrl || "",
-      ai: ai
-        ? {
-          tag: ai.tag || "Pending",
-          summary: ai.summary || "",
-          score: typeof ai.score === "number" ? ai.score : null,
-          raw: ai.raw || null,
-          updatedAt: ai.updatedAt || null,
-          error: ai.error || null,
-        }
-        : {
-          tag: "Pending",
-          summary: "",
-          score: null,
-          raw: null,
-          updatedAt: null,
-          error: null,
-        },
-      likedBy: [],
-      likesCount: 0,
-      comments: [],
-      commentsCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    return result;
-  } finally {
-    await client.close();
-  }
+  const payload = {
+    user_id: userId,
+    content: content || "",
+    media_url: mediaUrl || "",
+    ai_tag: ai?.tag || "Pending",
+    ai_summary: ai?.summary || "",
+    ai_score: typeof ai?.score === "number" ? ai.score : null,
+    ai_raw: ai?.raw ?? null,
+    ai_updated_at: ai?.updatedAt || null,
+    ai_error: ai?.error || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from("posts")
+    .insert([payload])
+    .select("id")
+    .single();
+
+  if (error) throw error;
+
+  // keep similar shape to Mongo insertOne result
+  return { insertedId: data.id, acknowledged: true };
 }
 
+/**
+ * listUserPosts(userId)
+ * Mongo returned an array of post docs with embedded likes/comments counts.
+ * We'll return posts with likesCount/commentsCount computed.
+ */
 async function listUserPosts(userId) {
-  const { client, db } = await connect("read");
-  try {
-    const posts = db.collection("posts");
-    const cursor = posts
-      .find({ userId: new ObjectId(userId) })
-      .sort({ createdAt: -1 });
-    return await cursor.toArray();
-  } finally {
-    await client.close();
+  const { data: posts, error } = await supabase
+    .from("posts")
+    .select(
+      "id,user_id,content,media_url,ai_tag,ai_summary,ai_score,ai_raw,ai_updated_at,ai_error,created_at,updated_at"
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  if (!posts || posts.length === 0) return [];
+
+  const postIds = posts.map((p) => p.id);
+
+  // likes counts
+  const { data: likesAgg, error: likesErr } = await supabase
+    .from("post_likes")
+    .select("post_id")
+    .in("post_id", postIds);
+
+  if (likesErr) throw likesErr;
+
+  const likesCountMap = new Map();
+  for (const row of likesAgg || []) {
+    likesCountMap.set(row.post_id, (likesCountMap.get(row.post_id) || 0) + 1);
   }
+
+  // comments counts
+  const { data: commentsAgg, error: commentsErr } = await supabase
+    .from("post_comments")
+    .select("post_id")
+    .in("post_id", postIds);
+
+  if (commentsErr) throw commentsErr;
+
+  const commentsCountMap = new Map();
+  for (const row of commentsAgg || []) {
+    commentsCountMap.set(row.post_id, (commentsCountMap.get(row.post_id) || 0) + 1);
+  }
+
+  // Return in a shape that mirrors your Mongo doc fields
+  return posts.map((p) => ({
+    _id: p.id, // compatibility with controllers expecting _id
+    userId: p.user_id,
+    content: p.content,
+    mediaUrl: p.media_url,
+    ai: {
+      tag: p.ai_tag,
+      summary: p.ai_summary,
+      score: p.ai_score,
+      raw: p.ai_raw,
+      updatedAt: p.ai_updated_at,
+      error: p.ai_error,
+    },
+    likedBy: [], // we don't return full arrays by default (same as before unless controllers depend on it)
+    likesCount: likesCountMap.get(p.id) || 0,
+    comments: [], // not returned here
+    commentsCount: commentsCountMap.get(p.id) || 0,
+    createdAt: p.created_at,
+    updatedAt: p.updated_at,
+  }));
 }
 
+/**
+ * updatePostAI(postId, ai)
+ */
 async function updatePostAI(postId, ai) {
-  const { client, db } = await connect("write");
-  try {
-    const posts = db.collection("posts");
-    await posts.updateOne(
-      { _id: new ObjectId(postId) },
-      {
-        $set: {
-          "ai.tag": ai?.tag || "Pending",
-          "ai.summary": ai?.summary || "",
-          "ai.score": typeof ai?.score === "number" ? ai.score : null,
-          "ai.raw": ai?.raw || null,
-          "ai.updatedAt": ai?.updatedAt || new Date(),
-          "ai.error": ai?.error || null,
-          updatedAt: new Date(),
-        },
-      }
-    );
-  } finally {
-    await client.close();
-  }
+  const payload = {
+    ai_tag: ai?.tag || "Pending",
+    ai_summary: ai?.summary || "",
+    ai_score: typeof ai?.score === "number" ? ai.score : null,
+    ai_raw: ai?.raw ?? null,
+    ai_updated_at: ai?.updatedAt || new Date().toISOString(),
+    ai_error: ai?.error || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from("posts").update(payload).eq("id", postId);
+  if (error) throw error;
 }
 
+/**
+ * likePost(postId, userId)
+ * Mongo returned true if modifiedCount > 0. We'll return true if insert succeeded, false if already liked.
+ */
 async function likePost(postId, userId) {
-  const { client, db } = await connect("write");
-  try {
-    const posts = db.collection("posts");
-    const res = await posts.updateOne(
-      { _id: new ObjectId(postId), likedBy: { $ne: new ObjectId(userId) } },
-      { $addToSet: { likedBy: new ObjectId(userId) }, $inc: { likesCount: 1 }, $set: { updatedAt: new Date() } }
-    );
-    return res.modifiedCount > 0;
-  } finally {
-    await client.close();
-  }
+  const { error } = await supabase.from("post_likes").insert([
+    { post_id: postId, user_id: userId },
+  ]);
+
+  if (!error) return true;
+
+  // If already liked, Supabase/Postgres throws duplicate key error (23505)
+  // We treat that as "false" (no change)
+  if (error.code === "23505") return false;
+
+  throw error;
 }
 
+/**
+ * unlikePost(postId, userId)
+ * Mongo returned true if the user had liked it.
+ * We'll delete row and return true if a row was deleted.
+ */
 async function unlikePost(postId, userId) {
-  const { client, db } = await connect("write");
-  try {
-    const posts = db.collection("posts");
-    // Pull userId and decrement likesCount only if userId existed
-    const post = await posts.findOne({ _id: new ObjectId(postId) }, { projection: { likedBy: 1, likesCount: 1 } });
-    if (!post) return false;
-    const hadLike = (post.likedBy || []).some((u) => String(u) === String(userId));
-    await posts.updateOne(
-      { _id: new ObjectId(postId) },
-      {
-        $pull: { likedBy: new ObjectId(userId) },
-        $inc: { likesCount: hadLike && post.likesCount > 0 ? -1 : 0 },
-        $set: { updatedAt: new Date() },
-      }
-    );
-    return hadLike;
-  } finally {
-    await client.close();
-  }
+  const { data, error } = await supabase
+    .from("post_likes")
+    .delete()
+    .eq("post_id", postId)
+    .eq("user_id", userId)
+    .select("post_id");
+
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
 }
 
+/**
+ * addComment(postId, userId, text)
+ * Mongo returned a comment ObjectId. We'll return UUID string id.
+ */
 async function addComment(postId, userId, text) {
-  const { client, db } = await connect("write");
-  try {
-    const posts = db.collection("posts");
-    const commentId = new ObjectId();
-    await posts.updateOne(
-      { _id: new ObjectId(postId) },
-      {
-        $push: {
-          comments: {
-            _id: commentId,
-            userId: new ObjectId(userId),
-            text,
-            createdAt: new Date(),
-          },
-        },
-        $inc: { commentsCount: 1 },
-        $set: { updatedAt: new Date() },
-      }
-    );
-    return commentId;
-  } finally {
-    await client.close();
-  }
+  const { data, error } = await supabase
+    .from("post_comments")
+    .insert([{ post_id: postId, user_id: userId, text }])
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data.id; // commentId
 }
 
+/**
+ * deleteComment(postId, commentId, userId)
+ * Mongo checked ownership and returned boolean.
+ */
 async function deleteComment(postId, commentId, userId) {
-  const { client, db } = await connect("write");
-  try {
-    const posts = db.collection("posts");
-    const post = await posts.findOne(
-      { _id: new ObjectId(postId) },
-      { projection: { comments: 1, commentsCount: 1 } }
-    );
-    if (!post) return false;
-    const exists = (post.comments || []).some(
-      (c) => String(c._id) === String(commentId) && String(c.userId) === String(userId)
-    );
-    if (!exists) return false;
-    await posts.updateOne(
-      { _id: new ObjectId(postId) },
-      {
-        $pull: { comments: { _id: new ObjectId(commentId) } },
-        $inc: { commentsCount: post.commentsCount > 0 ? -1 : 0 },
-        $set: { updatedAt: new Date() },
-      }
-    );
-    return true;
-  } finally {
-    await client.close();
-  }
+  const { data, error } = await supabase
+    .from("post_comments")
+    .delete()
+    .eq("id", commentId)
+    .eq("post_id", postId)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
 }
 
-module.exports = { createPost, listUserPosts, updatePostAI, likePost, unlikePost, addComment, deleteComment };
+module.exports = {
+  createPost,
+  listUserPosts,
+  updatePostAI,
+  likePost,
+  unlikePost,
+  addComment,
+  deleteComment,
+};

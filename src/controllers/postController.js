@@ -1,155 +1,157 @@
-const postModel = require("../models/postModel");
-const { analyzePost } = require("../services/ai.service");
-const logger = require("../utils/logger");
+const { supabase } = require("../config/supabaseClient");
 
-// Create a new post for the current user
-async function create(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+/**
+ * Create a post and return { insertedId } to match Mongo insertOne result usage.
+ */
+async function createPost({ userId, content, mediaUrl, ai }) {
+  const payload = {
+    user_id: userId,
+    content: content || "",
+    media_url: mediaUrl || "",
+    ai_tag: ai?.tag || "Pending",
+    ai_summary: ai?.summary || "",
+    ai_score: typeof ai?.score === "number" ? ai.score : null,
+    ai_raw: ai?.raw ?? null,
+    ai_updated_at: ai?.updatedAt || null,
+    ai_error: ai?.error || null,
+    updated_at: new Date().toISOString(),
+  };
 
-  const { content, mediaUrl } = req.validatedBody || req.body || {};
-  const rawAi = req.body?.ai;
-  let aiFromClient = null;
-  try {
-    if (rawAi && typeof rawAi === "object") aiFromClient = rawAi;
-    else if (rawAi && typeof rawAi === "string") aiFromClient = JSON.parse(rawAi);
-  } catch {}
-  let aiPayload = { tag: "Pending", summary: "", score: null };
-  if (aiFromClient) {
-    const status = String(aiFromClient.fact_check_status || "").toLowerCase();
-    const map = {
-      verified: "Verified",
-      misleading: "Misleading",
-      debunked: "False",
-      outdated: "Outdated",
-      unverified: "Unverified",
-      "not applicable": "Not Applicable",
-    };
-    aiPayload = {
-      tag: map[status] || "Unverified",
-      summary: aiFromClient.summary || "",
-      score:
-        typeof aiFromClient.credibility_score === "number"
-          ? Math.round(aiFromClient.credibility_score)
-          : null,
-    };
-  }
-  try {
-    const result = await postModel.createPost({
-      userId: req.session.userId,
-      content,
-      mediaUrl,
-      ai: aiPayload,
-    });
-    const postId = result.insertedId;
-    if (!aiFromClient) {
-      req.logger?.info("AI analysis scheduled for post %s", String(postId));
-      setImmediate(async () => {
-        try {
-          logger.info("AI analysis started for post %s", String(postId));
-          const ai = await analyzePost(content || "", mediaUrl || "");
-          await postModel.updatePostAI(postId, ai);
-          logger.info("AI analysis finished for post %s", String(postId));
-        } catch (e) {
-          logger.error("AI analysis error for post %s: %o", String(postId), e?.message || e);
-        }
-      });
-    }
-    return res.status(201).json({ id: postId, ai: { tag: aiPayload.tag } });
-  } catch (err) {
-    req.logger?.error("Create post error for %s: %o", req.session.email, err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+  const { data, error } = await supabase
+    .from("posts")
+    .insert([payload])
+    .select("id")
+    .single();
+
+  if (error) throw error;
+
+  return { insertedId: data.id, acknowledged: true };
 }
 
-// List posts for current user (simple helper)
-async function myPosts(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
-  try {
-    const posts = await postModel.listUserPosts(req.session.userId);
-    const toAnalyze = posts.filter(
-      (p) => !p.ai || !p.ai.tag || p.ai.tag === "Pending"
-    );
-    if (toAnalyze.length > 0) {
-      try {
-        await Promise.all(
-          toAnalyze.map(async (p) => {
-            const ai = await analyzePost(p.content || "", p.mediaUrl || "");
-            await postModel.updatePostAI(p._id, ai);
-            p.ai = {
-              tag: ai?.tag || "Unverified",
-              summary: ai?.summary || "",
-              score: typeof ai?.score === "number" ? ai.score : null,
-            };
-          })
-        );
-      } catch (e) {
-        req.logger?.error("Backfill AI failed: %o", e?.message || e);
-      }
-    }
-    return res.json({ posts });
-  } catch (err) {
-    req.logger?.error("List posts error for %s: %o", req.session.email, err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+async function updatePostAI(postId, ai) {
+  const payload = {
+    ai_tag: ai?.tag || "Unverified",
+    ai_summary: ai?.summary || "",
+    ai_score: typeof ai?.score === "number" ? ai.score : null,
+    ai_raw: ai?.raw ?? null,
+    ai_updated_at: new Date().toISOString(),
+    ai_error: ai?.error || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from("posts").update(payload).eq("id", postId);
+  if (error) throw error;
 }
 
-async function like(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
-  const id = req.params.id;
-  try {
-    const ok = await postModel.likePost(id, req.session.userId);
-    return res.json({ liked: ok });
-  } catch (err) {
-    req.logger?.error("Like post error %s: %o", id, err);
-    return res.status(500).json({ error: "Internal server error" });
+/**
+ * Return posts in the shape your controller expects:
+ * {_id, content, mediaUrl, ai:{tag,summary,score}, ...}
+ */
+async function listUserPosts(userId) {
+  const { data: posts, error } = await supabase
+    .from("posts")
+    .select("id,user_id,content,media_url,ai_tag,ai_summary,ai_score,created_at,updated_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  if (!posts || posts.length === 0) return [];
+
+  const postIds = posts.map((p) => p.id);
+
+  // likes count
+  const { data: likesRows, error: likesErr } = await supabase
+    .from("post_likes")
+    .select("post_id")
+    .in("post_id", postIds);
+  if (likesErr) throw likesErr;
+
+  const likesCountMap = new Map();
+  for (const r of likesRows || []) {
+    likesCountMap.set(r.post_id, (likesCountMap.get(r.post_id) || 0) + 1);
   }
+
+  // comments count
+  const { data: commentRows, error: commentsErr } = await supabase
+    .from("post_comments")
+    .select("post_id")
+    .in("post_id", postIds);
+  if (commentsErr) throw commentsErr;
+
+  const commentsCountMap = new Map();
+  for (const r of commentRows || []) {
+    commentsCountMap.set(r.post_id, (commentsCountMap.get(r.post_id) || 0) + 1);
+  }
+
+  return posts.map((p) => ({
+    _id: p.id,
+    userId: p.user_id,
+    content: p.content,
+    mediaUrl: p.media_url,
+    ai: {
+      tag: p.ai_tag || "Pending",
+      summary: p.ai_summary || "",
+      score: p.ai_score ?? null,
+    },
+    likesCount: likesCountMap.get(p.id) || 0,
+    commentsCount: commentsCountMap.get(p.id) || 0,
+    createdAt: p.created_at,
+    updatedAt: p.updated_at,
+  }));
 }
 
-async function unlike(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
-  const id = req.params.id;
-  try {
-    const ok = await postModel.unlikePost(id, req.session.userId);
-    return res.json({ unliked: ok });
-  } catch (err) {
-    req.logger?.error("Unlike post error %s: %o", id, err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+async function likePost(postId, userId) {
+  const { error } = await supabase
+    .from("post_likes")
+    .insert([{ post_id: postId, user_id: userId }]);
+
+  if (!error) return true;
+  if (error.code === "23505") return false; // already liked
+  throw error;
 }
 
-async function comment(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
-  const id = req.params.id;
-  const text = typeof (req.body?.text || req.validatedBody?.text) === "string" ? req.body.text || req.validatedBody.text : "";
-  if (!text.trim()) return res.status(400).json({ error: "text required" });
-  if (text.length > 1000) return res.status(400).json({ error: "text too long" });
-  try {
-    const commentId = await postModel.addComment(id, req.session.userId, text.trim());
-    return res.status(201).json({ id: commentId });
-  } catch (err) {
-    req.logger?.error("Comment post error %s: %o", id, err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+async function unlikePost(postId, userId) {
+  const { data, error } = await supabase
+    .from("post_likes")
+    .delete()
+    .eq("post_id", postId)
+    .eq("user_id", userId)
+    .select("post_id");
+
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
 }
 
-async function deleteComment(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
-  const id = req.params.id;
-  const commentId = req.params.commentId;
-  try {
-    const ok = await postModel.deleteComment(id, commentId, req.session.userId);
-    if (!ok) return res.status(404).json({ error: "comment not found" });
-    return res.json({ deleted: true });
-  } catch (err) {
-    req.logger?.error("Delete comment error %s/%s: %o", id, commentId, err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+async function addComment(postId, userId, text) {
+  const { data, error } = await supabase
+    .from("post_comments")
+    .insert([{ post_id: postId, user_id: userId, text }])
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data.id;
 }
 
-module.exports = { create, myPosts, like, unlike, comment, deleteComment };
+async function deleteComment(postId, commentId, userId) {
+  const { data, error } = await supabase
+    .from("post_comments")
+    .delete()
+    .eq("id", commentId)
+    .eq("post_id", postId)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+}
+
+module.exports = {
+  createPost,
+  updatePostAI,
+  listUserPosts,
+  likePost,
+  unlikePost,
+  addComment,
+  deleteComment,
+};
