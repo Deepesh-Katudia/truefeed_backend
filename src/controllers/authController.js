@@ -38,7 +38,7 @@ async function login(req, res) {
   try {
     const user = await authService.authenticateUser({ email, password });
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
-    req.session.userId = user._id.toString();
+    req.session.userId = user.id.toString();
     req.session.email = user.email;
     req.session.role = user.role || "user";
     logger.info("User logged in (controller): %s", user.email);
@@ -82,7 +82,7 @@ async function me(req, res) {
   try {
     const user = await authService.getUserByEmail(req.session.email);
     if (!user) return res.status(404).json({ error: "User not found" });
-    const { password, ...rest } = user;
+    const { password_hash, ...rest } = user;
     return res.json({ user: rest });
   } catch (err) {
     logger.error(
