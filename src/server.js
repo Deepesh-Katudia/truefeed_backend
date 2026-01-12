@@ -1,39 +1,20 @@
 require("dotenv").config();
+const session = require("express-session");
 const { app, initSessions, registerRoutes } = require("./routes/api");
-const MongoStore = require("connect-mongo");
-const {
-  PORT,
-  DATABASE_URL,
-  EDITOR_URI,
-  ADMIN_URI,
-} = require("./config/envPath");
-const { ensureIndexes } = require("./config/ensureIndexes");
+const { PORT } = require("./config/envPath");
 
 (async function start() {
-  // create the session store during startup so module import doesn't connect
-  const mongoUrl = EDITOR_URI || ADMIN_URI;
-  let store;
-  if (mongoUrl) {
-    store = MongoStore.create({ mongoUrl, collectionName: "sessions" });
-  } else {
-    throw new Error(
-      "No DATABASE_URL provided; session store requires a MongoDB URL"
-    );
-  }
+  // Use default MemoryStore for now (dev-safe).
+  // Later we can switch to Redis or a Postgres session store.
+  const store = undefined;
 
-  // initialize session middleware on the app
+  // Initialize session middleware on the app
+  // If your initSessions expects a store, we call it with no store and let it default,
+  // otherwise we patch initSessions next (see note below).
   initSessions(store);
 
-  // register routes after sessions are initialized
+  // Register routes after sessions are initialized
   registerRoutes();
-
-  // Ensure required DB indexes exist (non-blocking on errors)
-  try {
-    await ensureIndexes();
-  } catch (e) {
-    const logger = require("./utils/logger");
-    logger.warn("Index creation failed or skipped: %o", e?.message || e);
-  }
 
   app.listen(PORT, () => {
     const logger = require("./utils/logger");
