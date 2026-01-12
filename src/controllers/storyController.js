@@ -1,6 +1,6 @@
-const { GridFSBucket } = require("mongodb");
-const { connect } = require("../config/dbConnection");
 const storyModel = require("../models/storyModel");
+const { uploadBufferToUploadsBucket } = require("../services/storageService");
+
 
 async function create(req, res) {
   if (!req.session || !req.session.userId)
@@ -27,31 +27,26 @@ async function create(req, res) {
 async function uploadMedia(req, res) {
   if (!req.session || !req.session.userId)
     return res.status(401).json({ error: "Not authenticated" });
+
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  const { client, db } = await connect("write");
+
   try {
-    const bucket = new GridFSBucket(db, { bucketName: "uploads" });
-    const filename = `${req.session.userId}-story-${Date.now()}-${(req.file.originalname || "file").replace(/\s+/g, "_")}`;
-    const uploadStream = bucket.openUploadStream(filename, {
-      contentType: req.file.mimetype || "application/octet-stream",
-      metadata: { userId: req.session.userId, kind: "story" },
+    const safeName = (req.file.originalname || "file").replace(/\s+/g, "_");
+    const path = `stories/${req.session.userId}/${Date.now()}-${safeName}`;
+
+    const publicUrl = await uploadBufferToUploadsBucket({
+      path,
+      buffer: req.file.buffer,
+      contentType: req.file.mimetype,
     });
-    uploadStream.end(req.file.buffer);
-    uploadStream.on("finish", async (file) => {
-      await client.close();
-      return res.status(201).json({ url: `/api/v1/files/${file._id.toString()}` });
-    });
-    uploadStream.on("error", async () => {
-      await client.close();
-      req.logger?.error("Story upload failed");
-      return res.status(500).json({ error: "upload failed" });
-    });
+
+    return res.status(201).json({ url: publicUrl });
   } catch (e) {
-    await client.close();
     req.logger?.error("Story upload error: %o", e);
     return res.status(500).json({ error: "upload failed" });
   }
 }
+
 
 async function feed(req, res) {
   if (!req.session || !req.session.userId)

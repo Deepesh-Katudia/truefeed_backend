@@ -1,11 +1,6 @@
-const { connect } = require("../config/dbConnection");
-const { ObjectId } = require("mongodb");
+const { supabase } = require("../config/supabaseClient");
 
-async function ensureIndexes(db) {
-  const stories = db.collection("stories");
-  await stories.createIndex({ userId: 1, createdAt: -1 });
-  await stories.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-}
+
 
 function deriveMediaType(url) {
   if (!url) return "none";
@@ -15,87 +10,112 @@ function deriveMediaType(url) {
 }
 
 async function createStory({ userId, text, mediaUrl }) {
-  const { client, db } = await connect("write");
-  try {
-    await ensureIndexes(db);
-    const stories = db.collection("stories");
-    const now = new Date();
-    const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const res = await stories.insertOne({
-      userId: new ObjectId(userId),
-      text: text || "",
-      mediaUrl: mediaUrl || "",
-      mediaType: deriveMediaType(mediaUrl),
-      createdAt: now,
-      expiresAt: expires,
-      viewsCount: 0,
-      viewedBy: [],
-    });
-    return { insertedId: res.insertedId, expiresAt: expires };
-  } finally {
-    await client.close();
-  }
+  const now = new Date();
+  const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  const payload = {
+    user_id: userId,
+    text: text || "",
+    media_url: mediaUrl || "",
+    media_type: deriveMediaType(mediaUrl),
+    created_at: now.toISOString(),
+    expires_at: expires.toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from("stories")
+    .insert([payload])
+    .select("id,expires_at")
+    .single();
+
+  if (error) throw error;
+
+  // keep compatibility with old return
+  return { insertedId: data.id, expiresAt: data.expires_at };
 }
 
 async function markViewed({ storyId, viewerUserId }) {
-  const { client, db } = await connect("write");
-  try {
-    const stories = db.collection("stories");
-    await stories.updateOne(
-      { _id: new ObjectId(storyId) },
-      {
-        $addToSet: { viewedBy: new ObjectId(viewerUserId) },
-        $inc: { viewsCount: 1 },
-      }
-    );
-  } finally {
-    await client.close();
-  }
+  // Insert view; ignore duplicate views (primary key prevents duplicates)
+  const { error } = await supabase
+    .from("story_views")
+    .insert([{ story_id: storyId, user_id: viewerUserId }]);
+
+  if (!error) return;
+
+  // If already viewed, ignore (duplicate key 23505)
+  if (error.code === "23505") return;
+
+  throw error;
 }
 
+/**
+ * feedActiveByUser()
+ * Mongo grouped stories by userId and joined user docs.
+ * We replicate: return [{ user, latestCreatedAt, items: [...] }]
+ */
 async function feedActiveByUser() {
-  const { client, db } = await connect("read");
-  try {
-    const stories = db.collection("stories");
-    const users = db.collection("users");
-    const now = new Date();
-    const agg = await stories
-      .aggregate([
-        { $match: { expiresAt: { $gt: now } } },
-        { $sort: { createdAt: -1 } },
-        {
-          $group: {
-            _id: "$userId",
-            latestCreatedAt: { $first: "$createdAt" },
-            items: {
-              $push: {
-                _id: "$_id",
-                text: "$text",
-                mediaUrl: "$mediaUrl",
-                mediaType: "$mediaType",
-                createdAt: "$createdAt",
-                expiresAt: "$expiresAt",
-              },
-            },
-          },
-        },
-        { $sort: { latestCreatedAt: -1 } },
-      ])
-      .toArray();
-    const userIds = agg.map((g) => g._id);
-    const userDocs = await users
-      .find({ _id: { $in: userIds } }, { projection: { password: 0 } })
-      .toArray();
-    const map = new Map(userDocs.map((u) => [String(u._id), u]));
-    const result = agg.map((g) => ({
-      user: map.get(String(g._id)) || { _id: g._id },
+  const nowIso = new Date().toISOString();
+
+  // 1) Get active stories sorted latest first
+  const { data: stories, error } = await supabase
+    .from("stories")
+    .select("id,user_id,text,media_url,media_type,created_at,expires_at")
+    .gt("expires_at", nowIso)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  if (!stories || stories.length === 0) return [];
+
+  // 2) Group in JS (because PostgREST group-by is limited)
+  const grouped = new Map();
+  for (const s of stories) {
+    if (!grouped.has(s.user_id)) {
+      grouped.set(s.user_id, {
+        userId: s.user_id,
+        latestCreatedAt: s.created_at,
+        items: [],
+      });
+    }
+    grouped.get(s.user_id).items.push({
+      _id: s.id,
+      text: s.text,
+      mediaUrl: s.media_url,
+      mediaType: s.media_type,
+      createdAt: s.created_at,
+      expiresAt: s.expires_at,
+    });
+  }
+
+  const userIds = Array.from(grouped.keys());
+
+  // 3) Fetch users (exclude password_hash)
+  const { data: users, error: usersErr } = await supabase
+    .from("users")
+    .select("id,email,name,role,created_at,picture_url")
+    .in("id", userIds);
+
+  if (usersErr) throw usersErr;
+
+  const userMap = new Map((users || []).map((u) => [u.id, u]));
+
+  // 4) Build final result in same shape as Mongo model returned
+  const result = Array.from(grouped.values())
+    .sort((a, b) => new Date(b.latestCreatedAt) - new Date(a.latestCreatedAt))
+    .map((g) => ({
+      user: userMap.get(g.userId) || { _id: g.userId },
       latestCreatedAt: g.latestCreatedAt,
       items: g.items,
     }));
-    return result;
-  } finally {
-    await client.close();
+
+  // Optional: match Mongo user shape where id was _id
+  // If your controllers expect user._id, you can map it:
+  for (const group of result) {
+    if (group.user && group.user.id) {
+      group.user._id = group.user.id;
+    }
   }
+
+  return result;
 }
 
 module.exports = { createStory, markViewed, feedActiveByUser };
