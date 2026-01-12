@@ -1,52 +1,69 @@
-const { connect } = require("../config/dbConnection");
-const { ObjectId } = require("mongodb");
+// const { connect } = require("../config/dbConnection");
+// const { ObjectId } = require("mongodb");
+const { supabase } = require("../config/supabaseClient");
 
-async function findByEmail(email, permission = "read") {
-  const { client, db } = await connect(permission);
-  try {
-    const users = db.collection("users");
-    const u = await users.findOne({ email });
-    return u;
-  } finally {
-    await client.close();
-  }
+
+function notMigrated(fn) {
+  return async () => {
+    throw new Error(`${fn} not migrated to Supabase yet`);
+  };
 }
 
-async function createUser(user) {
-  const { client, db } = await connect("write");
-  try {
-    const users = db.collection("users");
-    const result = await users.insertOne(user);
-    return result;
-  } finally {
-    await client.close();
-  }
+async function findByEmail(email) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id,email,name,password_hash,role,created_at")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
 
-async function findById(id, permission = "read") {
-  const { client, db } = await connect(permission);
-  try {
-    const users = db.collection("users");
-    const u = await users.findOne({ _id: new ObjectId(id) });
-    return u;
-  } finally {
-    await client.close();
-  }
+async function createUser({ name, email, passwordHash, role = "user" }) {
+  const { data, error } = await supabase
+    .from("users")
+    .insert([
+      { name, email, password_hash: passwordHash, role },
+    ])
+    .select("id,email,name,role,created_at")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+
+async function findById(id) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id,email,name,role,created_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
 
 async function updateUserById(id, updates) {
-  const { client, db } = await connect("write");
-  try {
-    const users = db.collection("users");
-    const result = await users.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { ...updates, updatedAt: new Date() } }
-    );
-    return result;
-  } finally {
-    await client.close();
+  const allowed = ["name", "picture_url"]; // add more profile fields you support
+  const safe = {};
+  for (const k of allowed) {
+    if (updates[k] !== undefined) safe[k] = updates[k];
   }
+  safe.updated_at = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("users")
+    .update(safe)
+    .eq("id", id)
+    .select("id,email,name,role,created_at,updated_at,picture_url")
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
+
 
 /**
  * Sends a friend request: sender -> target
@@ -57,209 +74,124 @@ async function updateUserById(id, updates) {
  * Returns an object describing what happened.
  */
 async function sendFriendRequest(senderId, targetId) {
-  if (!ObjectId.isValid(senderId) || !ObjectId.isValid(targetId)) {
-    return { ok: false, code: "invalid_id" };
-  }
-  if (String(senderId) === String(targetId)) {
-    return { ok: false, code: "self_request" };
-  }
+  if (!senderId || !targetId) return { ok: false, code: "invalid_id" };
+  if (String(senderId) === String(targetId)) return { ok: false, code: "self_request" };
 
-  const senderObjId = new ObjectId(senderId);
-  const targetObjId = new ObjectId(targetId);
+  // ensure target exists
+  const target = await findById(targetId);
+  if (!target) return { ok: false, code: "target_not_found" };
 
-  const { client, db } = await connect("write");
-  try {
-    const users = db.collection("users");
+  // already friends?
+  const { data: alreadyFriends, error: frErr } = await supabase
+    .from("friendships")
+    .select("user_id")
+    .eq("user_id", senderId)
+    .eq("friend_id", targetId)
+    .maybeSingle();
+  if (frErr) throw frErr;
+  if (alreadyFriends) return { ok: false, code: "already_friends" };
 
-    // 1) Ensure target exists
-    const target = await users.findOne({ _id: targetObjId }, { projection: { _id: 1 } });
-    if (!target) return { ok: false, code: "target_not_found" };
+  // already requested?
+  const { data: pending, error: pendingErr } = await supabase
+    .from("friend_requests")
+    .select("id,status")
+    .eq("sender_id", senderId)
+    .eq("receiver_id", targetId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (pendingErr) throw pendingErr;
+  if (pending) return { ok: false, code: "already_requested" };
 
-    // 2) Block if already friends (either side)
-    const alreadyFriends = await users.findOne({
-      _id: senderObjId,
-      friends: targetObjId,
-    }, { projection: { _id: 1 } });
+  const { error } = await supabase
+    .from("friend_requests")
+    .insert([{ sender_id: senderId, receiver_id: targetId, status: "pending" }]);
 
-    if (alreadyFriends) return { ok: false, code: "already_friends" };
-
-    // 3) Block if request already pending
-    const alreadyOutgoing = await users.findOne({
-      _id: senderObjId,
-      friendRequestsOutgoing: targetObjId,
-    }, { projection: { _id: 1 } });
-
-    if (alreadyOutgoing) return { ok: false, code: "already_requested" };
-
-    // 4) Update sender (outgoing)
-    const senderUpdate = await users.updateOne(
-      {
-        _id: senderObjId,
-        friends: { $ne: targetObjId },
-        friendRequestsOutgoing: { $ne: targetObjId },
-      },
-      {
-        $addToSet: { friendRequestsOutgoing: targetObjId },
-        $set: { updatedAt: new Date() },
-      }
-    );
-
-    if (senderUpdate.matchedCount === 0) {
-      // could happen if user missing or conditions failed
-      return { ok: false, code: "sender_update_blocked" };
-    }
-
-    // 5) Update target (incoming)
-    const targetUpdate = await users.updateOne(
-      {
-        _id: targetObjId,
-        friends: { $ne: senderObjId },
-        friendRequestsIncoming: { $ne: senderObjId },
-      },
-      {
-        $addToSet: { friendRequestsIncoming: senderObjId },
-        $set: { updatedAt: new Date() },
-      }
-    );
-
-    if (targetUpdate.matchedCount === 0) {
-      // Rollback sender outgoing if target update was blocked
-      await users.updateOne(
-        { _id: senderObjId },
-        { $pull: { friendRequestsOutgoing: targetObjId }, $set: { updatedAt: new Date() } }
-      );
-      return { ok: false, code: "target_update_blocked" };
-    }
-
-    return { ok: true };
-  } finally {
-    await client.close();
-  }
+  if (error) throw error;
+  return { ok: true };
 }
+
 
 // Accept Firend Request
 async function acceptFriendRequest(receiverId, senderId) {
-  if (!ObjectId.isValid(receiverId) || !ObjectId.isValid(senderId)) {
-    return { ok: false, code: "invalid_id" };
-  }
-  if (String(receiverId) === String(senderId)) {
-    return { ok: false, code: "self_accept" };
-  }
+  if (!receiverId || !senderId) return { ok: false, code: "invalid_id" };
+  if (String(receiverId) === String(senderId)) return { ok: false, code: "self_accept" };
 
-  const receiverObjId = new ObjectId(receiverId);
-  const senderObjId = new ObjectId(senderId);
+  // must have a pending request
+  const { data: reqRow, error: reqErr } = await supabase
+    .from("friend_requests")
+    .select("id,status")
+    .eq("sender_id", senderId)
+    .eq("receiver_id", receiverId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (reqErr) throw reqErr;
+  if (!reqRow) return { ok: false, code: "no_pending_request" };
 
-  const { client, db } = await connect("write");
-  try {
-    const users = db.collection("users");
+  // mark accepted
+  const { error: updErr } = await supabase
+    .from("friend_requests")
+    .update({ status: "accepted", responded_at: new Date().toISOString() })
+    .eq("id", reqRow.id);
+  if (updErr) throw updErr;
 
-    const senderExists = await users.findOne({ _id: senderObjId }, { projection: { _id: 1 } });
-    if (!senderExists) return { ok: false, code: "sender_not_found" };
+  // insert friendships both directions
+  const { error: insErr } = await supabase
+    .from("friendships")
+    .insert([
+      { user_id: receiverId, friend_id: senderId },
+      { user_id: senderId, friend_id: receiverId },
+    ]);
+  if (insErr) throw insErr;
 
-    // If already friends, stop
-    const alreadyFriends = await users.findOne(
-      { _id: receiverObjId, friends: senderObjId },
-      { projection: { _id: 1 } }
-    );
-    if (alreadyFriends) return { ok: false, code: "already_friends" };
-
-    // Must have a pending request: receiver has incoming from sender
-    const pending = await users.findOne(
-      { _id: receiverObjId, friendRequestsIncoming: senderObjId },
-      { projection: { _id: 1 } }
-    );
-    if (!pending) return { ok: false, code: "no_pending_request" };
-
-    // Update receiver: remove incoming request + add friend
-    await users.updateOne(
-      { _id: receiverObjId },
-      {
-        $pull: { friendRequestsIncoming: senderObjId },
-        $addToSet: { friends: senderObjId },
-        $set: { updatedAt: new Date() },
-      }
-    );
-
-    // Update sender: remove outgoing request + add friend
-    await users.updateOne(
-      { _id: senderObjId },
-      {
-        $pull: { friendRequestsOutgoing: receiverObjId },
-        $addToSet: { friends: receiverObjId },
-        $set: { updatedAt: new Date() },
-      }
-    );
-
-    return { ok: true };
-  } finally {
-    await client.close();
-  }
+  return { ok: true };
 }
+
 
 async function declineFriendRequest(receiverId, senderId) {
-  if (!ObjectId.isValid(receiverId) || !ObjectId.isValid(senderId)) {
-    return { ok: false, code: "invalid_id" };
-  }
-  if (String(receiverId) === String(senderId)) {
-    return { ok: false, code: "self_decline" };
-  }
-  const receiverObjId = new ObjectId(receiverId);
-  const senderObjId = new ObjectId(senderId);
-  const { client, db } = await connect("write");
-  try {
-    const users = db.collection("users");
-    const pending = await users.findOne(
-      { _id: receiverObjId, friendRequestsIncoming: senderObjId },
-      { projection: { _id: 1 } }
-    );
-    if (!pending) return { ok: false, code: "no_pending_request" };
-    await users.updateOne(
-      { _id: receiverObjId },
-      { $pull: { friendRequestsIncoming: senderObjId }, $set: { updatedAt: new Date() } }
-    );
-    await users.updateOne(
-      { _id: senderObjId },
-      { $pull: { friendRequestsOutgoing: receiverObjId }, $set: { updatedAt: new Date() } }
-    );
-    return { ok: true };
-  } finally {
-    await client.close();
-  }
+  if (!receiverId || !senderId) return { ok: false, code: "invalid_id" };
+  if (String(receiverId) === String(senderId)) return { ok: false, code: "self_decline" };
+
+  const { data: reqRow, error: reqErr } = await supabase
+    .from("friend_requests")
+    .select("id,status")
+    .eq("sender_id", senderId)
+    .eq("receiver_id", receiverId)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (reqErr) throw reqErr;
+  if (!reqRow) return { ok: false, code: "no_pending_request" };
+
+  const { error } = await supabase
+    .from("friend_requests")
+    .update({ status: "declined", responded_at: new Date().toISOString() })
+    .eq("id", reqRow.id);
+
+  if (error) throw error;
+  return { ok: true };
 }
+
+
 async function searchUsers(query, { excludeUserId, limit = 10 } = {}) {
-  const { client, db } = await connect("read");
-  try {
-    const users = db.collection("users");
+  const q = String(query || "").trim();
+  if (!q) return [];
 
-    const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 20));
-    const q = String(query || "").trim();
-    if (!q) return [];
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 20));
 
-    const match = {
-      $and: [
-        { _id: { $ne: new ObjectId(excludeUserId) } },
-        {
-          $or: [
-            { name: { $regex: q, $options: "i" } },
-            { email: { $regex: q, $options: "i" } },
-          ],
-        },
-      ],
-    };
+  let builder = supabase
+    .from("users")
+    .select("id,email,name,role,created_at,picture_url")
+    .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+    .order("updated_at", { ascending: false })
+    .limit(safeLimit);
 
-    const results = await users
-      .find(match, {
-        projection: { password: 0 }, // never return password hash
-      })
-      .sort({ updatedAt: -1 })
-      .limit(safeLimit)
-      .toArray();
+  if (excludeUserId) builder = builder.neq("id", excludeUserId);
 
-    return results;
-  } finally {
-    await client.close();
-  }
+  const { data, error } = await builder;
+  if (error) throw error;
+
+  return data || [];
 }
+
 
 
 
@@ -267,9 +199,9 @@ module.exports = {
   findByEmail,
   createUser,
   findById,
-  updateUserById,
-  sendFriendRequest,
-  acceptFriendRequest,
-  declineFriendRequest,
-  searchUsers,
+  updateUserById: notMigrated("updateUserById"),
+  sendFriendRequest: notMigrated("sendFriendRequest"),
+  acceptFriendRequest: notMigrated("acceptFriendRequest"),
+  declineFriendRequest: notMigrated("declineFriendRequest"),
+  searchUsers: notMigrated("searchUsers"),
 };
