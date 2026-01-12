@@ -57,25 +57,27 @@ app.use((req, res, next) => {
 const sessionSecret = SESSION_SECRET;
 
 function initSessions(store) {
-  if (!store) {
-    throw new Error(
-      "initSessions requires a session store (e.g. connect-mongo)"
-    );
+  const sessionOptions = {
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: NODE_ENV === "production",
+      sameSite: NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+    },
+  };
+
+  // If a store is provided (redis/postgres/etc), use it.
+  // Otherwise, Express MemoryStore is used (fine for local dev).
+  if (store) {
+    sessionOptions.store = store;
+  } else {
+    logger.warn("No session store provided. Using MemoryStore (dev only).");
   }
-  app.use(
-    session({
-      secret: sessionSecret,
-      resave: false,
-      saveUninitialized: false,
-      store,
-      cookie: {
-        httpOnly: true,
-        secure: NODE_ENV === "production",
-        sameSite: NODE_ENV === "production" ? "none" : "lax",
-        maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-      },
-    })
-  );
+
+  app.use(session(sessionOptions));
 }
 
 let routesRegistered = false;
@@ -160,13 +162,6 @@ function registerRoutes() {
   // Mount post routes (create/list)
   const v1Posts = require("./v1/postRoutes");
   app.use("/api/v1/posts", requireAuth, v1Posts);
-
-  // const v1AI = require("./v1/aiRoutes");
-  // app.use("/api/v1/ai", requireAuth, v1AI);
-
-  // Public files streaming (GridFS) by id
-  const v1Files = require("./v1/filesRoutes");
-  app.use("/api/v1/files", v1Files);
 
     // Mount friends routes
   const v1Friends = require("./v1/friendsRoutes");
