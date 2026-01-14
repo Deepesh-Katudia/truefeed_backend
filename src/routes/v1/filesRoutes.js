@@ -1,33 +1,32 @@
 const express = require("express");
-const { connect } = require("../../config/dbConnection");
-const { ObjectId, GridFSBucket } = require("mongodb");
 const router = express.Router();
+const { supabase } = require("../../config/supabaseClient");
 
-// GET /api/v1/files/:id - stream file by ObjectId
-router.get("/:id", async (req, res) => {
-  const id = req.params.id;
-  if (!id) return res.status(400).json({ error: "missing id" });
-  let _id;
-  try {
-    _id = new ObjectId(id);
-  } catch (e) {
-    return res.status(400).json({ error: "invalid id" });
-  }
-  const { client, db } = await connect("read");
-  try {
-    const bucket = new GridFSBucket(db, { bucketName: "uploads" });
-    const download = bucket.openDownloadStream(_id);
+// GET /api/v1/files/* - stream file from Supabase Storage bucket "uploads"
+// Example: /api/v1/files/profiles/<userId>/123-avatar.png
+router.get("/*", async (req, res) => {
+  // req.params[0] contains the wildcard path after /files/
+  const path = req.params[0];
 
-    download.on("file", (file) => {
-      if (file?.contentType) res.setHeader("Content-Type", file.contentType);
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    });
-    download.on("error", () => res.status(404).end());
-    download.on("end", () => client.close());
-    download.pipe(res);
+  if (!path) return res.status(400).json({ error: "missing path" });
+
+  try {
+    const { data, error } = await supabase.storage.from("uploads").download(path);
+    if (error) return res.status(404).json({ error: "not found" });
+
+    // data is a Blob in node; convert to buffer
+    const arrayBuffer = await data.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // We can’t reliably know content-type from download() without extra metadata
+    // so we set a safe default. Browser will still display images/videos in many cases.
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+    return res.status(200).send(buffer);
   } catch (e) {
-    await client.close();
-    res.status(500).json({ error: "stream error" });
+    req.logger?.error("supabase file stream error: %o", e);
+    return res.status(500).json({ error: "stream error" });
   }
 });
 

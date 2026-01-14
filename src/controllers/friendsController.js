@@ -1,4 +1,5 @@
 const userModel = require("../models/userModel");
+const { supabase } = require("../config/supabaseClient");
 
 async function sendRequest(req, res) {
   if (!req.session || !req.session.userId) {
@@ -27,7 +28,6 @@ async function sendRequest(req, res) {
   }
 }
 
-
 async function acceptRequest(req, res) {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -55,6 +55,29 @@ async function acceptRequest(req, res) {
   }
 }
 
+async function declineRequest(req, res) {
+  if (!req.session || !req.session.userId) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+  const { senderUserId } = req.validatedBody || req.body || {};
+
+  try {
+    const result = await userModel.declineFriendRequest(req.session.userId, senderUserId);
+
+    if (!result.ok) {
+      if (result.code === "invalid_id") return res.status(400).json({ error: "invalid senderUserId" });
+      if (result.code === "self_decline") return res.status(400).json({ error: "cannot decline yourself" });
+      if (result.code === "no_pending_request") return res.status(409).json({ error: "no pending request to decline" });
+      return res.status(409).json({ error: "decline failed", reason: result.code });
+    }
+
+    return res.status(200).json({ message: "Friend request declined" });
+  } catch (err) {
+    req.logger?.error("Decline friend request error: %o", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+}
+
 async function searchUsers(req, res) {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -68,13 +91,11 @@ async function searchUsers(req, res) {
   }
 
   try {
-    // Get me (to compute friend/request status)
-    const me = await userModel.findById(req.session.userId, "read");
-    if (!me) return res.status(404).json({ error: "User not found" });
-
-    const friendsSet = new Set((me.friends || []).map(String));
-    const incomingSet = new Set((me.friendRequestsIncoming || []).map(String));
-    const outgoingSet = new Set((me.friendRequestsOutgoing || []).map(String));
+    // Compute relationship sets from Supabase tables
+    const [friendsSet, pending] = await Promise.all([
+      userModel.getFriendIds(req.session.userId),
+      userModel.getPendingRequestSets(req.session.userId),
+    ]);
 
     const users = await userModel.searchUsers(q, {
       excludeUserId: req.session.userId,
@@ -82,14 +103,14 @@ async function searchUsers(req, res) {
     });
 
     const results = users.map((u) => ({
-      _id: u._id,
+      _id: u.id || u._id,
       name: u.name || "",
       email: u.email,
-      picture: u.picture || null,
+      picture: u.picture_url || u.picture || null,
       description: u.description || "",
-      isFriend: friendsSet.has(String(u._id)),
-      incomingPending: incomingSet.has(String(u._id)),
-      outgoingPending: outgoingSet.has(String(u._id)),
+      isFriend: friendsSet.has(u.id),
+      incomingPending: pending.incoming.has(u.id),
+      outgoingPending: pending.outgoing.has(u.id),
     }));
 
     return res.status(200).json({ results });
@@ -99,54 +120,41 @@ async function searchUsers(req, res) {
   }
 }
 
-async function declineRequest(req, res) {
-  if (!req.session || !req.session.userId) {
-    return res.status(401).json({ error: "Not authenticated" });
-  }
-  const { senderUserId } = req.validatedBody || req.body || {};
-  try {
-    const result = await userModel.declineFriendRequest(req.session.userId, senderUserId);
-    if (!result.ok) {
-      if (result.code === "invalid_id") return res.status(400).json({ error: "invalid senderUserId" });
-      if (result.code === "self_decline") return res.status(400).json({ error: "cannot decline yourself" });
-      if (result.code === "no_pending_request") return res.status(409).json({ error: "no pending request to decline" });
-      return res.status(409).json({ error: "decline failed", reason: result.code });
-    }
-    return res.status(200).json({ message: "Friend request declined" });
-  } catch (err) {
-    req.logger?.error("Decline friend request error: %o", err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-}
-
 async function incomingRequests(req, res) {
   if (!req.session || !req.session.userId) {
     return res.status(401).json({ error: "Not authenticated" });
   }
+
   try {
-    const me = await userModel.findById(req.session.userId, "read");
-    if (!me) return res.status(404).json({ error: "User not found" });
-    const incomingIds = (me.friendRequestsIncoming || []).map(String);
+    // pending incoming: receiver = me, status = pending
+    const { data: reqRows, error } = await supabase
+      .from("friend_requests")
+      .select("sender_id")
+      .eq("receiver_id", req.session.userId)
+      .eq("status", "pending");
+
+    if (error) throw error;
+
+    const incomingIds = (reqRows || []).map((r) => r.sender_id);
     if (incomingIds.length === 0) return res.json({ results: [] });
-    const { connect } = require("../config/dbConnection");
-    const { ObjectId } = require("mongodb");
-    const { client, db } = await connect("read");
-    try {
-      const users = db.collection("users");
-      const docs = await users
-        .find({ _id: { $in: incomingIds.map((id) => new ObjectId(id)) } }, { projection: { password: 0 } })
-        .toArray();
-      const results = docs.map((u) => ({
-        _id: u._id,
-        name: u.name || "",
-        email: u.email,
-        picture: u.picture || null,
-        description: u.description || "",
-      }));
-      return res.json({ results });
-    } finally {
-      await client.close();
-    }
+
+    // fetch sender user docs
+    const { data: users, error: usersErr } = await supabase
+      .from("users")
+      .select("id,name,email,picture_url,description")
+      .in("id", incomingIds);
+
+    if (usersErr) throw usersErr;
+
+    const results = (users || []).map((u) => ({
+      _id: u.id,
+      name: u.name || "",
+      email: u.email,
+      picture: u.picture_url || null,
+      description: u.description || "",
+    }));
+
+    return res.json({ results });
   } catch (err) {
     req.logger?.error("Incoming requests error: %o", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -154,4 +162,3 @@ async function incomingRequests(req, res) {
 }
 
 module.exports = { sendRequest, acceptRequest, declineRequest, searchUsers, incomingRequests };
-

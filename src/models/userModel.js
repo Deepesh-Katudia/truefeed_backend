@@ -46,7 +46,8 @@ async function findById(id) {
 }
 
 async function updateUserById(id, updates) {
-  const allowed = ["name", "picture_url"]; // add more profile fields you support
+  const allowed = ["name", "picture_url", "description", "phone"];
+  // add more profile fields you support
   const safe = {};
   for (const k of allowed) {
     if (updates[k] !== undefined) safe[k] = updates[k];
@@ -170,6 +171,43 @@ async function declineFriendRequest(receiverId, senderId) {
   return { ok: true };
 }
 
+// Returns Set of friend user IDs for userId
+async function getFriendIds(userId) {
+  const { data, error } = await supabase
+    .from("friendships")
+    .select("friend_id")
+    .eq("user_id", userId);
+
+  if (error) throw error;
+  return new Set((data || []).map((r) => r.friend_id));
+}
+
+// Returns { incoming: Set, outgoing: Set } of pending request IDs
+async function getPendingRequestSets(userId) {
+  const [{ data: incoming, error: inErr }, { data: outgoing, error: outErr }] =
+    await Promise.all([
+      supabase
+        .from("friend_requests")
+        .select("sender_id")
+        .eq("receiver_id", userId)
+        .eq("status", "pending"),
+      supabase
+        .from("friend_requests")
+        .select("receiver_id")
+        .eq("sender_id", userId)
+        .eq("status", "pending"),
+    ]);
+
+  if (inErr) throw inErr;
+  if (outErr) throw outErr;
+
+  return {
+    incoming: new Set((incoming || []).map((r) => r.sender_id)),
+    outgoing: new Set((outgoing || []).map((r) => r.receiver_id)),
+  };
+}
+
+
 
 async function searchUsers(query, { excludeUserId, limit = 10 } = {}) {
   const q = String(query || "").trim();
@@ -199,9 +237,12 @@ module.exports = {
   findByEmail,
   createUser,
   findById,
-  updateUserById: notMigrated("updateUserById"),
-  sendFriendRequest: notMigrated("sendFriendRequest"),
-  acceptFriendRequest: notMigrated("acceptFriendRequest"),
-  declineFriendRequest: notMigrated("declineFriendRequest"),
-  searchUsers: notMigrated("searchUsers"),
+  updateUserById,
+  sendFriendRequest,
+  acceptFriendRequest,
+  declineFriendRequest,
+  searchUsers,
+  getFriendIds,
+  getPendingRequestSets,
 };
+
