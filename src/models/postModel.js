@@ -2,7 +2,6 @@ const { supabase } = require("../config/supabaseClient");
 
 /**
  * createPost({ userId, content, mediaUrl, ai })
- * Mongo returned insertOne result. Here we return the created row, plus insertedId to stay compatible.
  */
 async function createPost({ userId, content, mediaUrl, ai }) {
   const payload = {
@@ -32,7 +31,6 @@ async function createPost({ userId, content, mediaUrl, ai }) {
 
 /**
  * listUserPosts(userId)
- * Mongo returned an array of post docs with embedded likes/comments counts.
  * We'll return posts with likesCount/commentsCount computed.
  */
 async function listUserPosts(userId) {
@@ -117,8 +115,7 @@ async function updatePostAI(postId, ai) {
 }
 
 /**
- * likePost(postId, userId)
- * Mongo returned true if modifiedCount > 0. We'll return true if insert succeeded, false if already liked.
+ * likePost(postId, userId)succeeded, false if already liked.
  */
 async function likePost(postId, userId) {
   const { error } = await supabase.from("post_likes").insert([
@@ -136,8 +133,7 @@ async function likePost(postId, userId) {
 
 /**
  * unlikePost(postId, userId)
- * Mongo returned true if the user had liked it.
- * We'll delete row and return true if a row was deleted.
+
  */
 async function unlikePost(postId, userId) {
   const { data, error } = await supabase
@@ -153,7 +149,7 @@ async function unlikePost(postId, userId) {
 
 /**
  * addComment(postId, userId, text)
- * Mongo returned a comment ObjectId. We'll return UUID string id.
+ 
  */
 async function addComment(postId, userId, text) {
   const { data, error } = await supabase
@@ -168,7 +164,7 @@ async function addComment(postId, userId, text) {
 
 /**
  * deleteComment(postId, commentId, userId)
- * Mongo checked ownership and returned boolean.
+ 
  */
 async function deleteComment(postId, commentId, userId) {
   const { data, error } = await supabase
