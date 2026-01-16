@@ -1,30 +1,44 @@
-const { ObjectId } = require("mongodb");
 const userModel = require("../models/userModel");
 const postModel = require("../models/postModel");
 
+function looksLikeUuid(v) {
+  return typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
 async function getUser(req, res) {
-  if (!req.session || !req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+  if (!req.session || !req.session.userId)
+    return res.status(401).json({ error: "Not authenticated" });
+
   const id = req.params.id;
-  if (!ObjectId.isValid(id)) return res.status(400).json({ error: "invalid id" });
+  if (!looksLikeUuid(id)) return res.status(400).json({ error: "invalid id" });
+
   try {
-    const me = await userModel.findById(req.session.userId, "read");
-    if (!me) return res.status(404).json({ error: "me not found" });
-    const u = await userModel.findById(id, "read");
+    const meId = req.session.userId;
+
+    // Fetch target user
+    const u = await userModel.findById(id);
     if (!u) return res.status(404).json({ error: "user not found" });
-    const friendsSet = new Set((me.friends || []).map(String));
-    const incomingSet = new Set((me.friendRequestsIncoming || []).map(String));
-    const outgoingSet = new Set((me.friendRequestsOutgoing || []).map(String));
-    const isFriend = friendsSet.has(String(u._id));
-    const incomingPending = incomingSet.has(String(u._id));
-    const outgoingPending = outgoingSet.has(String(u._id));
+
+    // Relationship flags now come from tables:
+    // - friendships
+    // - friend_requests
+    const [friendsSet, pendingSets] = await Promise.all([
+      userModel.getFriendIds(meId),
+      userModel.getPendingRequestSets(meId),
+    ]);
+
+    const isFriend = friendsSet.has(id);
+    const incomingPending = pendingSets.incoming.has(id); // they sent me request
+    const outgoingPending = pendingSets.outgoing.has(id); // I sent them request
+
     return res.json({
       user: {
-        _id: u._id,
+        _id: u.id, // keep API compatibility
         name: u.name || "",
         email: u.email,
-        picture: u.picture || null,
+        picture: u.picture_url || null,
         description: u.description || "",
-        createdAt: u.createdAt || null,
+        createdAt: u.created_at || null,
       },
       relation: { isFriend, incomingPending, outgoingPending },
     });
@@ -35,9 +49,12 @@ async function getUser(req, res) {
 }
 
 async function getUserPosts(req, res) {
-  if (!req.session || !req.session.userId) return res.status(401).json({ error: "Not authenticated" });
+  if (!req.session || !req.session.userId)
+    return res.status(401).json({ error: "Not authenticated" });
+
   const id = req.params.id;
-  if (!ObjectId.isValid(id)) return res.status(400).json({ error: "invalid id" });
+  if (!looksLikeUuid(id)) return res.status(400).json({ error: "invalid id" });
+
   try {
     const posts = await postModel.listUserPosts(id);
     return res.json({ posts });

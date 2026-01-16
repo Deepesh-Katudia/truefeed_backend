@@ -1,5 +1,3 @@
-// const { connect } = require("../config/dbConnection");
-// const { ObjectId } = require("mongodb");
 const { supabase } = require("../config/supabaseClient");
 
 
