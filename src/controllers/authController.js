@@ -3,29 +3,42 @@ const logger = require("../utils/logger");
 
 async function register(req, res) {
   const { name, email, password } = req.body || {};
-  if (!email || !password)
-    return res.status(400).json({ error: "email and password are required" });
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: "name, email and password are required" });
+  }
+
   try {
     const result = await authService.registerUser({ name, email, password });
-    req.session.userId = result.id.toString();
-    req.session.email = email;
-    // if registration includes a role (e.g., seeded admin) keep it, otherwise default handled at creation
+
+    // Ensure session uses the same ID format everywhere
+    req.session.userId = String(result.id);
+    req.session.email = result.email;
     req.session.role = result.role || "user";
+
     logger.info("New user registered (controller): %s", email);
+
     req.session.save((err) => {
       if (err) {
-        logger.error(
-          "Error saving session after register (controller) %s: %o",
-          email,
-          err
-        );
+        logger.error("Error saving session after register %s: %o", email, err);
         return res.status(500).json({ error: "could not establish session" });
       }
-      return res.status(201).json(result);
+
+      // Return same shape your frontend expects
+      return res.status(201).json({
+        user: {
+          _id: result.id,
+          name: result.name || "",
+          email: result.email,
+          role: result.role || "user",
+          createdAt: result.created_at || null,
+        },
+      });
     });
   } catch (err) {
-    if (err.message === "UserExists")
+    if (err.message === "UserExists") {
       return res.status(409).json({ error: "User already exists" });
+    }
     logger.error("Register controller error for %s: %o", email, err);
     return res.status(500).json({ error: "Internal server error" });
   }
