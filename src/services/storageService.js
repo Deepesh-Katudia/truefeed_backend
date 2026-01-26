@@ -1,8 +1,10 @@
 const { supabase } = require("../config/supabaseClient");
 
+const BUCKET = "Uploads"; // must match exactly
+
 async function uploadBufferToUploadsBucket({ path, buffer, contentType }) {
   const { error } = await supabase.storage
-    .from("uploads")
+    .from(BUCKET)
     .upload(path, buffer, {
       contentType: contentType || "application/octet-stream",
       upsert: false,
@@ -10,7 +12,7 @@ async function uploadBufferToUploadsBucket({ path, buffer, contentType }) {
 
   if (error) throw error;
 
-  const { data } = supabase.storage.from("uploads").getPublicUrl(path);
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
 
