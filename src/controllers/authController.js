@@ -90,13 +90,26 @@ function logout(req, res) {
 }
 
 async function me(req, res) {
-  if (!req.session || !req.session.userId)
+  if (!req.session || !req.session.userId) {
     return res.status(401).json({ error: "Not authenticated" });
+  }
+
   try {
     const user = await authService.getUserByEmail(req.session.email);
     if (!user) return res.status(404).json({ error: "User not found" });
+
     const { password_hash, ...rest } = user;
-    return res.json({ user: rest });
+
+    // IMPORTANT: normalize field names for frontend
+    // Supabase column: picture_url
+    // Frontend expects: picture
+    const normalized = {
+      ...rest,
+      picture: rest.picture || rest.picture_url || null,
+      _id: rest._id || rest.id || req.session.userId, // optional, keeps frontend consistent
+    };
+
+    return res.json({ user: normalized });
   } catch (err) {
     logger.error(
       "Me controller error for %s: %o",
@@ -106,5 +119,6 @@ async function me(req, res) {
     return res.status(500).json({ error: "Internal server error" });
   }
 }
+
 
 module.exports = { register, login, logout, me };
