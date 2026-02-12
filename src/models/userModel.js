@@ -10,13 +10,14 @@ function notMigrated(fn) {
 async function findByEmail(email) {
   const { data, error } = await supabase
     .from("users")
-    .select("id,email,name,password_hash,role,created_at")
+    .select("id,email,name,password_hash,role,created_at,updated_at,picture_url,description,phone")
     .eq("email", email)
     .maybeSingle();
 
   if (error) throw error;
   return data;
 }
+
 
 async function createUser({ name, email, passwordHash, role = "user" }) {
   const { data, error } = await supabase
