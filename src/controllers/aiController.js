@@ -13,26 +13,19 @@ async function generateAIContent(req, res) {
 
 async function checkAICredibility(req, res) {
   logger.info("Received credibility check request: %o", req.body);
+
   try {
-    let { checkFor } = req.body;
+    const { checkFor } = req.body;
 
     if (!checkFor) {
       return res.status(400).json({ error: "Missing text to check" });
     }
-    const prompt = `
-    You are a strict fact-checker. 
-    Analyze the credibility of the following statement using Google Search.
-    
-    STATEMENT: "${checkFor}"
-    
-    Verify if this is:
-    1. Currently True
-    2. Historically True but Outdated (Context required)
-    3. False/Misleading
-    `;
 
-    const response = await ai.checkCredibility(prompt);
-    return res.status(200).json({ response });
+    // IMPORTANT: pass raw statement, let service do the formatting + JSON schema
+    const result = await ai.checkCredibility(checkFor);
+
+    // Keep same response shape frontend expects
+    return res.status(200).json({ response: result });
   } catch (error) {
     console.error("Error checking AI credibility:", error);
     return res.status(500).json({ error: "Failed to check AI credibility" });
