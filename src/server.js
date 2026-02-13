@@ -1,19 +1,43 @@
 require("dotenv").config();
-const session = require("express-session");
+
+const { createClient } = require("redis");
+const { RedisStore } = require("connect-redis");
+
 const { app, initSessions, registerRoutes } = require("./routes/api");
-const { PORT } = require("./config/envPath");
+const { PORT, NODE_ENV } = require("./config/envPath");
 
 (async function start() {
-  // Use default MemoryStore for now (dev-safe).
-  // Later we can switch to Redis or a Postgres session store.
-  const store = undefined;
+  let store;
 
-  // Initialize session middleware on the app
-  // If your initSessions expects a store, we call it with no store and let it default,
-  // otherwise we patch initSessions next (see note below).
+  if (process.env.REDIS_URL) {
+    const redisClient = createClient({
+      url: process.env.REDIS_URL,
+      socket: {
+        reconnectStrategy: (retries) => Math.min(retries * 50, 500),
+      },
+    });
+
+    redisClient.on("error", (err) => {
+      console.error("Redis Client Error:", err);
+    });
+
+    await redisClient.connect();
+
+    store = new RedisStore({
+      client: redisClient,
+      prefix: "truefeed:sess:",
+    });
+
+    console.log("✅ Redis session store enabled");
+  } else {
+    console.log("⚠️ REDIS_URL not set, using MemoryStore (not safe on Vercel)");
+  }
+
+  if (NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+
   initSessions(store);
-
-  // Register routes after sessions are initialized
   registerRoutes();
 
   app.listen(PORT, () => {
