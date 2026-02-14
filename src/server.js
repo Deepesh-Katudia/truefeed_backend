@@ -1,27 +1,33 @@
 require("dotenv").config();
 
 const { createClient } = require("redis");
-const { RedisStore } = require("connect-redis");
-
+const { RedisStore } = require("connect-redis"); // ✅ IMPORTANT
 const { app, initSessions, registerRoutes } = require("./routes/api");
 const { PORT, NODE_ENV } = require("./config/envPath");
+
+// Reuse Redis connection across serverless invocations
+let redisClient;
 
 (async function start() {
   let store;
 
   if (process.env.REDIS_URL) {
-    const redisClient = createClient({
-      url: process.env.REDIS_URL,
-      socket: {
-        reconnectStrategy: (retries) => Math.min(retries * 50, 500),
-      },
-    });
+    if (!redisClient) {
+      redisClient = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          tls: true,
+          reconnectStrategy: (retries) => Math.min(retries * 50, 500),
+        },
+      });
 
-    redisClient.on("error", (err) => {
-      console.error("Redis Client Error:", err);
-    });
+      redisClient.on("error", (err) => {
+        console.error("Redis Client Error:", err);
+      });
 
-    await redisClient.connect();
+      await redisClient.connect();
+      console.log("✅ Redis connected");
+    }
 
     store = new RedisStore({
       client: redisClient,
@@ -30,7 +36,7 @@ const { PORT, NODE_ENV } = require("./config/envPath");
 
     console.log("✅ Redis session store enabled");
   } else {
-    console.log("⚠️ REDIS_URL not set, using MemoryStore (not safe on Vercel)");
+    console.log("⚠️ REDIS_URL not set, using MemoryStore (breaks on Vercel)");
   }
 
   if (NODE_ENV === "production") {
