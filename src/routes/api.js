@@ -21,6 +21,25 @@ const allowedOrigins = new Set(
     .filter(Boolean)
 );
 
+function isAllowedOrigin(origin) {
+  if (allowedOrigins.size === 0) return true;
+  if (allowedOrigins.has(origin)) return true;
+
+  // ✅ allow Vercel preview URLs for this project
+  return /^https:\/\/truefeed-frontend-[a-z0-9-]+-codewithdeepesh29s-projects\.vercel\.app$/i.test(origin);
+}
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      return isAllowedOrigin(origin) ? cb(null, true) : cb(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
+
+
 app.use(
   cors({
     origin: (origin, cb) => {
