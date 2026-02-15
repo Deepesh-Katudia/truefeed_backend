@@ -134,14 +134,33 @@ function registerRoutes() {
   const v1Auth = require("./v1/authRoutes");
   app.use("/api/v1/auth", v1Auth);
 
-  // simple auth middleware using session
-  function requireAuth(req, res, next) {
-    if (req.session && req.session.userId) {
-      return next();
-    }
-    logger.warn("Unauthorized access attempt to %s from %s", req.originalUrl, req.ip);
-    return res.status(401).json({ error: "unauthorized" });
+function requireAuth(req, res, next) {
+  logger.info(
+    "AUTH DEBUG url=%s sid=%s hasSession=%s userId=%s origin=%s",
+    req.originalUrl,
+    req.sessionID,
+    Boolean(req.session),
+    req.session?.userId,
+    req.headers.origin
+  );
+
+  const sid =
+    req.session?.userId ||
+    req.session?.user?.id ||
+    req.session?.user?._id;
+
+  if (sid) {
+    req.session.userId = String(sid);
+    return next();
   }
+
+  logger.warn(
+    "Unauthorized access attempt to %s from %s",
+    req.originalUrl,
+    req.ip
+  );
+  return res.status(401).json({ error: "unauthorized" });
+}
 
   // Mount versioned logs routes
   const v1Logs = require("./v1/logsRoutes");
