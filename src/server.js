@@ -44,12 +44,13 @@ let redisClient;
   }
 
   initSessions(store);
-  registerRoutes();
+registerRoutes();
 
+if (process.env.VERCEL !== "1") {
   app.listen(PORT, () => {
     const logger = require("./utils/logger");
     logger.info("Server is running on port %s", PORT);
   });
+}
 })();
-
 module.exports = app;
