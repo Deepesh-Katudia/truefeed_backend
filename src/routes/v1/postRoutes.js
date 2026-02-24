@@ -36,13 +36,13 @@ router.get("/mine", controller.myPosts);
 
 // Upload media for a post (multipart/form-data, field name: media)
 router.post("/upload-media", uploadMedia.single("media"), async (req, res) => {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = req.user?.userId;
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
   try {
     const safeName = (req.file.originalname || "file").replace(/\s+/g, "_");
-    const path = `posts/${req.session.userId}/${Date.now()}-${safeName}`;
+    const path = `posts/${userId}/${Date.now()}-${safeName}`;
 
     const url = await uploadBufferToUploadsBucket({
       path,
@@ -59,12 +59,12 @@ router.post("/upload-media", uploadMedia.single("media"), async (req, res) => {
 
 // Create a post and upload media in one step (multipart/form-data)
 router.post("/create-with-media", uploadMedia.single("media"), async (req, res) => {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = req.user?.userId;
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
-  const content = typeof req.body?.content === "string" ? req.body.content.slice(0, 2000) : "";
+  const content =
+    typeof req.body?.content === "string" ? req.body.content.slice(0, 2000) : "";
 
-  // Optional AI from client (stringified JSON)
   const rawAi = req.body?.ai;
   let aiFromClient = null;
   try {
@@ -98,7 +98,7 @@ router.post("/create-with-media", uploadMedia.single("media"), async (req, res) 
   try {
     if (req.file) {
       const safeName = (req.file.originalname || "file").replace(/\s+/g, "_");
-      const path = `posts/${req.session.userId}/${Date.now()}-${safeName}`;
+      const path = `posts/${userId}/${Date.now()}-${safeName}`;
 
       mediaUrl = await uploadBufferToUploadsBucket({
         path,
@@ -109,13 +109,12 @@ router.post("/create-with-media", uploadMedia.single("media"), async (req, res) 
 
     const postModel = require("../../models/postModel");
     const insert = await postModel.createPost({
-      userId: req.session.userId,
+      userId,
       content,
       mediaUrl,
       ai: aiPayload,
     });
 
-    // Only schedule AI if client didn't send it
     if (!aiFromClient) {
       const { analyzePost } = require("../../services/ai.service");
       const logger = require("../../utils/logger");
