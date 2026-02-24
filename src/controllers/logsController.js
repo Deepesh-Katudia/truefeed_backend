@@ -39,7 +39,7 @@ function streamLog(req, res) {
     logger.info(
       "Requested stream log %s not found by user %s",
       date,
-      req.session?.email || "unknown"
+      req.user?.email || "unknown"
     );
     return res.status(404).json({ error: "log not found" });
   }

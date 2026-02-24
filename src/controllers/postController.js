@@ -1,5 +1,4 @@
 const postModel = require("../models/postModel");
-const userModel = require("../models/userModel");
 const { analyzePost } = require("../services/ai.service");
 
 const map = {
@@ -25,30 +24,32 @@ function normalizeAi(ai) {
   return { tag, summary, score, raw: ai };
 }
 
+function getUserId(req) {
+  return req.user?.userId ? String(req.user.userId) : "";
+}
+
 // POST /api/v1/posts
 async function create(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   const { content = "", mediaUrl = "" } = req.validatedBody || req.body || {};
 
   try {
-    // create post with Pending AI immediately
     const insert = await postModel.createPost({
-      userId: req.session.userId,
+      userId,
       content,
       mediaUrl,
       ai: { tag: "Pending", summary: "", score: null },
     });
 
-    // schedule AI analysis (non-blocking)
     setImmediate(async () => {
       try {
         const ai = await analyzePost(content || "", mediaUrl || "");
         const normalized = normalizeAi(ai);
         await postModel.updatePostAI(insert.insertedId, normalized);
-      } catch (e) {
-        // swallow errors; post remains pending/unverified
+      } catch {
+        // keep pending/unverified if AI fails
       }
     });
 
@@ -61,11 +62,11 @@ async function create(req, res) {
 
 // GET /api/v1/posts/mine
 async function myPosts(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
-    const posts = await postModel.listUserPosts(req.session.userId);
+    const posts = await postModel.listUserPosts(userId);
     return res.json({ posts });
   } catch (err) {
     req.logger?.error("myPosts error: %o", err);
@@ -75,11 +76,11 @@ async function myPosts(req, res) {
 
 // POST /api/v1/posts/:id/like
 async function like(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
-    const liked = await postModel.likePost(req.params.id, req.session.userId);
+    const liked = await postModel.likePost(req.params.id, userId);
     return res.json({ liked });
   } catch (err) {
     req.logger?.error("like error: %o", err);
@@ -89,11 +90,11 @@ async function like(req, res) {
 
 // POST /api/v1/posts/:id/unlike
 async function unlike(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
-    const unliked = await postModel.unlikePost(req.params.id, req.session.userId);
+    const unliked = await postModel.unlikePost(req.params.id, userId);
     return res.json({ unliked });
   } catch (err) {
     req.logger?.error("unlike error: %o", err);
@@ -103,14 +104,14 @@ async function unlike(req, res) {
 
 // POST /api/v1/posts/:id/comment
 async function comment(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   const text = String(req.body?.text || "").trim();
   if (!text) return res.status(400).json({ error: "text required" });
 
   try {
-    const id = await postModel.addComment(req.params.id, req.session.userId, text);
+    const id = await postModel.addComment(req.params.id, userId, text);
     return res.status(201).json({ id });
   } catch (err) {
     req.logger?.error("comment error: %o", err);
@@ -120,14 +121,14 @@ async function comment(req, res) {
 
 // DELETE /api/v1/posts/:id/comment/:commentId
 async function deleteComment(req, res) {
-  if (!req.session || !req.session.userId)
-    return res.status(401).json({ error: "Not authenticated" });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
     const deleted = await postModel.deleteComment(
       req.params.id,
       req.params.commentId,
-      req.session.userId
+      userId
     );
     return res.json({ deleted });
   } catch (err) {
