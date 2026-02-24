@@ -8,8 +8,7 @@ const USER_COLLECTION = process.env.USER_COLLECTION;
 const POST_COLLECTION = process.env.POST_COLLECTION;
 const COMMENT_COLLECTION = process.env.COMMENT_COLLECTION;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:3000";
-const SESSION_SECRET =
-  process.env.SESSION_SECRET || process.env.JWT_SECRET || "dev_session_secret";
+const JWT_SECRET = process.env.JWT_SECRET || "dev_jwt_secret";
 const NODE_ENV = process.env.NODE_ENV;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_PROJECT_NUMBER = process.env.GEMINI_PROJECT_NUMBER;
@@ -27,10 +26,10 @@ module.exports = {
   POST_COLLECTION,
   COMMENT_COLLECTION,
   FRONTEND_ORIGIN,
-  SESSION_SECRET,
   NODE_ENV,
   GEMINI_API_KEY,
   GEMINI_PROJECT_NUMBER,
   GEMINI_PROJECT_NAME,
   GEMINI_MODEL_NAME,
+  JWT_SECRET,
 };

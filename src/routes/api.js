@@ -1,19 +1,25 @@
+// src/routes/api.js
 const express = require("express");
 const path = require("path");
-const app = express();
-
-const session = require("express-session");
+const jwt = require("jsonwebtoken");
 const morgan = require("morgan");
 const cors = require("cors");
+
 const logger = require("../utils/logger");
-const { FRONTEND_ORIGIN, SESSION_SECRET, NODE_ENV } = require("../config/envPath");
+const { FRONTEND_ORIGIN, JWT_SECRET, NODE_ENV } = require("../config/envPath");
+
+const app = express();
 
 app.use(express.json());
 
 // HTTP request logging with morgan -> winston
 app.use(morgan("combined", { stream: logger.stream }));
 
-// CORS - allow frontend to send cookies for authentication
+/**
+ * CORS (JWT-friendly)
+ * - No cookies needed, so credentials: false
+ * - MUST allow Authorization header + OPTIONS preflight
+ */
 const allowedOrigins = new Set(
   String(FRONTEND_ORIGIN || "")
     .split(",")
@@ -21,39 +27,40 @@ const allowedOrigins = new Set(
     .filter(Boolean)
 );
 
+// Local dev convenience
+allowedOrigins.add("http://localhost:3000");
+allowedOrigins.add("http://127.0.0.1:3000");
+const LOCALHOST_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
 function isAllowedOrigin(origin) {
+  if (!origin) return true; // curl/postman/same-origin cases
+  if (LOCALHOST_REGEX.test(origin)) return true;
   if (allowedOrigins.size === 0) return true;
   if (allowedOrigins.has(origin)) return true;
 
-  // ✅ allow Vercel preview URLs for this project
-  return /^https:\/\/truefeed-frontend-[a-z0-9-]+-codewithdeepesh29s-projects\.vercel\.app$/i.test(origin);
+  // Allow Vercel preview URLs for this project
+  return /^https:\/\/truefeed-frontend-[a-z0-9-]+-codewithdeepesh29s-projects\.vercel\.app$/i.test(
+    origin
+  );
 }
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);
-      return isAllowedOrigin(origin) ? cb(null, true) : cb(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
-  })
-);
+const corsOptions = {
+  origin: (origin, cb) => {
+    return isAllowedOrigin(origin)
+      ? cb(null, true)
+      : cb(new Error(`Not allowed by CORS: ${origin}`));
+  },
+  credentials: false, // JWT in Authorization header (no cookies)
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
 
+app.use(cors(corsOptions));
+// Handle preflight for every route (regex avoids Express 5 path syntax issues)
+app.options(/.*/, cors(corsOptions)); // IMPORTANT: preflight for JWT requests
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);
-      if (allowedOrigins.size === 0 || allowedOrigins.has(origin)) {
-        return cb(null, true);
-      }
-      return cb(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
-  })
-);
-
-// If running behind a proxy/load balancer in production, trust proxy to allow secure cookies
+// If running behind a proxy/load balancer in production
 if (NODE_ENV === "production") {
   app.set("trust proxy", 1);
 }
@@ -64,41 +71,17 @@ app.use((req, res, next) => {
   next();
 });
 
-const sessionSecret = SESSION_SECRET;
-
-function initSessions(store) {
-  const sessionOptions = {
-    secret: sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: NODE_ENV === "production",
-      sameSite: NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-    },
-  };
-
-  if (store) {
-    sessionOptions.store = store;
-  } else {
-    logger.warn("No session store provided. Using MemoryStore (dev only).");
-  }
-
-  app.use(session(sessionOptions));
-}
-
 let routesRegistered = false;
 
 function registerRoutes() {
   if (routesRegistered) return;
 
-  // ✅ Health check at root (Vercel-safe)
+  // Health check at root
   app.get("/", (req, res) => {
     return res.status(200).json({ ok: true, service: "truefeed-backend" });
   });
 
-  // ✅ Serve docs only in non-production to avoid ENOENT crashes on Vercel
+  // Serve docs only in non-production
   if (NODE_ENV !== "production") {
     const docsDir = path.join(__dirname, "..", "..", "docs");
 
@@ -121,11 +104,10 @@ function registerRoutes() {
       next();
     }
 
-    // docs now under /docs
     app.use("/docs", setDocsSecurityHeaders, express.static(docsDir));
   }
 
-  // Dynamic Markdown fetch endpoint (whitelisted files in backend root)
+  // Dynamic Markdown fetch endpoint (whitelisted)
   const repoRoot = path.join(__dirname, "..", "..");
   const mdWhitelist = new Set(["README.md", "ENDPOINTS.md", "ARCHITECTURE.md"]);
 
@@ -135,6 +117,7 @@ function registerRoutes() {
       logger.warn("Docs MD request for disallowed file: %s", name);
       return res.status(404).json({ error: "not found" });
     }
+
     const filePath = path.join(repoRoot, name);
     res.setHeader("Content-Type", "text/markdown; charset=utf-8");
     res.sendFile(filePath, (err) => {
@@ -149,51 +132,45 @@ function registerRoutes() {
     });
   });
 
-  // Mount auth routes (register, login)
+  // Auth routes (public)
   const v1Auth = require("./v1/authRoutes");
   app.use("/api/v1/auth", v1Auth);
 
-function requireAuth(req, res, next) {
-  logger.info(
-    "AUTH DEBUG url=%s sid=%s hasSession=%s userId=%s origin=%s",
-    req.originalUrl,
-    req.sessionID,
-    Boolean(req.session),
-    req.session?.userId,
-    req.headers.origin
-  );
+  // JWT auth middleware (protected)
+  function requireAuth(req, res, next) {
+    const h = req.headers.authorization || "";
+    if (!h.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
 
-  const sid =
-    req.session?.userId ||
-    req.session?.user?.id ||
-    req.session?.user?._id;
+    const token = h.slice("Bearer ".length).trim();
 
-  if (sid) {
-    req.session.userId = String(sid);
-    return next();
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+
+      // attach user info for controllers
+      req.user = {
+        userId: String(decoded.userId),
+        email: decoded.email,
+        role: decoded.role || "user",
+      };
+
+      return next();
+    } catch (e) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
   }
 
-  logger.warn(
-    "Unauthorized access attempt to %s from %s",
-    req.originalUrl,
-    req.ip
-  );
-  return res.status(401).json({ error: "unauthorized" });
-}
-
-  // Mount versioned logs routes
+  // Protected routes
   const v1Logs = require("./v1/logsRoutes");
   app.use("/api/v1/logs", requireAuth, v1Logs);
 
-  // Mount profile routes
   const v1Profile = require("./v1/profileRoutes");
   app.use("/api/v1/profile", requireAuth, v1Profile);
 
-  // Mount post routes
   const v1Posts = require("./v1/postRoutes");
   app.use("/api/v1/posts", requireAuth, v1Posts);
 
-  // Mount friends routes
   const v1Friends = require("./v1/friendsRoutes");
   app.use("/api/v1/friends", requireAuth, v1Friends);
 
@@ -203,11 +180,11 @@ function requireAuth(req, res, next) {
   const v1Stories = require("./v1/storyRoutes");
   app.use("/api/v1/stories", requireAuth, v1Stories);
 
-  // ✅ AI routes (keep path same so frontend doesn't change)
+  // AI routes (public)
   const v1AI = require("./v1/aiRoutes");
   app.use("/api/v1/gemini", v1AI);
 
-  // Express error handler to log errors (keep last)
+  // Error handler (last)
   app.use((err, req, res, next) => {
     logger.error("Unhandled error: %o", err);
     res.status(500).json({ error: "internal server error" });
@@ -216,4 +193,4 @@ function requireAuth(req, res, next) {
   routesRegistered = true;
 }
 
-module.exports = { app, initSessions, registerRoutes };
+module.exports = { app, registerRoutes };
