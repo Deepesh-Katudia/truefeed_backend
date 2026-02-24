@@ -17,14 +17,6 @@ const uploadProfile = multer({
   },
 });
 
-// Auth middleware (run BEFORE multer)
-function requireAuth(req, res, next) {
-  if (!req.session || !req.session.userId) {
-    return res.status(401).json({ error: "Not authenticated" });
-  }
-  next();
-}
-
 // Wrap multer so upload errors return JSON cleanly
 function uploadSingle(fieldName) {
   return (req, res, next) => {
@@ -85,13 +77,12 @@ router.post(
 // Upload a new profile picture (multipart/form-data, field name: picture)
 router.post(
   "/upload-picture",
-  requireAuth,
   uploadSingle("picture"),
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
     try {
-      const path = safeUploadPath(req.session.userId, req.file.originalname);
+      const path = safeUploadPath(req.user.userId, req.file.originalname);
 
       const publicUrl = await uploadBufferToUploadsBucket({
         path,
@@ -112,7 +103,6 @@ router.post(
 // One-step multipart update: picture + fields
 router.post(
   "/update-with-picture",
-  requireAuth,
   uploadSingle("picture"),
   async (req, res) => {
     const updates = {};
@@ -130,7 +120,7 @@ router.post(
     // Optional picture upload
     if (req.file) {
       try {
-        const path = safeUploadPath(req.session.userId, req.file.originalname);
+        const path = safeUploadPath(req.user.userId, req.file.originalname);
 
         const publicUrl = await uploadBufferToUploadsBucket({
           path,
