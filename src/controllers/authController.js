@@ -7,6 +7,7 @@ function signToken(payload) {
   // keep it simple: 7 days
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 }
+console.log("JWT_SECRET loaded:", JWT_SECRET);
 
 function getBearerToken(req) {
   const h = req.headers.authorization || "";
@@ -47,18 +48,21 @@ async function register(req, res) {
       return res.status(409).json({ error: "User already exists" });
     }
     logger.error("Register controller error for %s: %o", email, err);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({ error: err.message });
   }
 }
 
 async function login(req, res) {
   const { email, password } = req.body || {};
+
   if (!email || !password) {
     return res.status(400).json({ error: "email and password are required" });
   }
 
   try {
     const user = await authService.authenticateUser({ email, password });
+
+    console.log("User returned from authenticateUser:", user); 
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = signToken({
@@ -67,18 +71,15 @@ async function login(req, res) {
       role: user.role || "user",
     });
 
-    logger.info("User logged in (controller): %s", user.email);
-
-    // keep response small
     return res.json({ token });
+
   } catch (err) {
-    logger.error("Login controller error for %s: %o", email, err);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("Login error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
 
 function logout(req, res) {
-  // Stateless JWT: frontend deletes token.
   return res.json({ message: "Logged out" });
 }
 
