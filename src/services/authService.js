@@ -27,16 +27,27 @@ async function registerUser({ name, email, password }) {
 }
 
 async function authenticateUser({ email, password }) {
+  // 1. Fetch user from Supabase
   const user = await userModel.findByEmail(email);
+
+  // 2. If no user found
   if (!user) return null;
 
-  const valid = await bcrypt.compare(password, user.password_hash);
+  // 3. Ensure password hash exists
+  const hash = user.password_hash || user.passwordHash;
+
+  if (!hash) {
+    throw new Error("Password hash missing in database");
+  }
+
+  // 4. Compare password safely
+  const valid = await bcrypt.compare(password, hash);
+
   if (!valid) return null;
 
-  // return user object (controller uses id + role)
+  // 5. Return full user object
   return user;
 }
-
 async function getUserByEmail(email) {
   return userModel.findByEmail(email);
 }
