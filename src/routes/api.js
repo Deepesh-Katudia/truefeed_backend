@@ -187,7 +187,7 @@ function registerRoutes() {
   // Error handler (last)
   app.use((err, req, res, next) => {
     logger.error("Unhandled error: %o", err);
-    res.status(500).json({ error: "internal server error" });
+    res.status(500).json({ error: err.message });
   });
 
   routesRegistered = true;
