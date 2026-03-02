@@ -1,4 +1,7 @@
 require("dotenv").config();
+fetch(process.env.SUPABASE_URL)
+  .then(res => console.log("Supabase reachable, status:", res.status))
+  .catch(err => console.error("Direct fetch failed:", err));
 
 const { app, registerRoutes } = require("./routes/api");
 const { PORT, NODE_ENV } = require("./config/envPath");
