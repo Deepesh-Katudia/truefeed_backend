@@ -6,9 +6,16 @@ function getEnv(name) {
   return v;
 }
 
+// 👇 ADD THESE TWO LINES HERE
+const SUPABASE_URL = getEnv("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+console.log("SUPABASE_URL:", SUPABASE_URL);
+console.log("SUPABASE_SERVICE_ROLE_KEY exists:", !!SUPABASE_SERVICE_ROLE_KEY);
+
 const supabase = createClient(
-  getEnv("SUPABASE_URL"),
-  getEnv("SUPABASE_SERVICE_ROLE_KEY"),
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
   {
     auth: { persistSession: false },
   }
