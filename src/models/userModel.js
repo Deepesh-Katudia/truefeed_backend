@@ -8,14 +8,24 @@ function notMigrated(fn) {
 }
 
 async function findByEmail(email) {
-  const { data, error } = await supabase
-    .from("users")
-    .select("id,email,name,password_hash,role,created_at,updated_at,picture_url,description,phone")
-    .eq("email", email)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", email)
+      .single();
 
-  if (error) throw error;
-  return data;
+    if (error) {
+      console.error("Supabase query error:", error);
+      throw error;
+    }
+
+    return data;
+
+  } catch (err) {
+    console.error("Supabase full error object:", err);
+    throw err;
+  }
 }
 
 
