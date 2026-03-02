@@ -48,8 +48,8 @@ async function create(req, res) {
         const ai = await analyzePost(content || "", mediaUrl || "");
         const normalized = normalizeAi(ai);
         await postModel.updatePostAI(insert.insertedId, normalized);
-      } catch {
-        // keep pending/unverified if AI fails
+      } catch (err) {
+        req.logger?.error("AI analysis error: %o", err);
       }
     });
 
