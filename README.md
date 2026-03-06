@@ -1,44 +1,166 @@
-# TrueFeed Backend
+# TrueFeed – Backend (Express + Supabase)
 
-Node.js / Express API server for TrueFeed. The backend follows a Layered Architecture (controllers, services, models) to keep business logic testable and decoupled from HTTP concerns.
+TrueFeed Backend is a Node.js / Express API server powering the TrueFeed social media platform.
 
-Quick start
+The backend follows a **Layered Architecture** (Controllers → Services → Models) to keep business logic clean, testable, and independent from HTTP concerns.
 
-1. Install dependencies:
+It handles authentication, posts, stories, friends, AI credibility checks, and database communication with Supabase.
 
-   npm install
+---
 
-2. Start the server (example):
+## 🎥 Project Demo
 
-   npm start
+Watch the full working demo of TrueFeed here:
 
-Project structure (recommended)
+👉 **YouTube Demo:**
+[https://youtu.be/PMiKg-slGtQ](https://youtu.be/PMiKg-slGtQ)
+
+---
+
+## 🚀 Features
+
+* 🔐 JWT-based authentication (Login / Register)
+* 🧾 Secure password hashing with bcrypt
+* 📝 Post creation with optional media
+* 🤖 AI credibility check endpoint
+* ❤️ Like & comment system
+* 📸 Story creation with expiration logic
+* 👥 Friend search and request system
+* 📂 Media streaming endpoint
+* 🛡 Centralized error handling
+* 📊 Structured logging with Morgan
+
+---
+
+## 🛠 Tech Stack
+
+* Node.js
+* Express.js
+* Supabase (PostgreSQL)
+* JWT (jsonwebtoken)
+* bcryptjs
+* CORS
+* Morgan (HTTP logging)
+
+---
+
+## ⚙️ Quick Start
+
+### 1️⃣ Install dependencies
+
+```bash
+npm install
+```
+
+### 2️⃣ Configure environment variables
+
+Create a `.env` file in the root directory:
+
+```
+PORT=4000
+JWT_SECRET=your_secret_key
+
+SUPABASE_URL=https://yourproject.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+### 3️⃣ Start the server
+
+```bash
+npm start
+```
+
+Server runs at:
+
+```
+http://localhost:4000
+```
+
+---
+
+## 📂 Project Structure
 
 ```
 src/
-├── controllers/   # HTTP handlers (call services)
+├── controllers/   # HTTP handlers (thin layer)
 ├── services/      # Business logic
-├── models/        # Database schema/ORM models
+├── models/        # Database interaction (Supabase)
 ├── routes/        # Route definitions
 ├── middleware/    # Auth, logging, CORS, etc.
-├── config/        # DB connection and config
-└── server.js      # App entry point
+├── config/        # Environment + client setup
+└── server.js      # Application entry point
 ```
 
-Notes
+---
 
-- Keep controllers thin and test services independently.
-- Add tests under `src/tests/` and use a test runner like Jest for unit/integration tests.
+## 🔐 Authentication Flow
 
-Routing notes
+1. User registers or logs in.
+2. Password is hashed using bcrypt.
+3. JWT token is generated and returned.
+4. Frontend sends token in `Authorization: Bearer <token>`.
+5. Protected routes verify the token before processing.
 
-- The primary routing entrypoint is now `src/routes/api.js` which initializes
-  and mounts versioned routes under `/api/v1/*`.
-- Legacy route files have been archived under `src/routes/archived/legacy-2025-10-12/`.
-  The original top-level route files were removed and the active routing entrypoint is `src/routes/api.js`.
+All protected routes are mounted under:
 
-## API Endpoints
+```
+/api/v1/*
+```
 
-For the full, always up-to-date API reference (including auth, profile, posts, and logs), see:
+---
 
-- [ENDPOINTS.md](./ENDPOINTS.md)
+## 📌 Routing Notes
+
+* Primary routing entrypoint:
+  `src/routes/api.js`
+
+* All active routes are versioned under:
+  `/api/v1/*`
+
+* Legacy route files have been archived under:
+  `src/routes/archived/legacy-2025-10-12/`
+
+---
+
+## 📖 API Reference
+
+For the full and up-to-date API documentation, see:
+
+* [ENDPOINTS.md](./ENDPOINTS.md)
+
+---
+
+## 🧪 Testing Recommendation
+
+Keep controllers thin and test services independently.
+
+Add tests under:
+
+```
+src/tests/
+```
+
+Recommended tools:
+
+* Jest
+* Supertest (for API testing)
+
+---
+
+## 🚀 Deployment
+
+Recommended hosting platforms:
+
+* Render
+* Railway
+* Fly.io
+* DigitalOcean
+
+Make sure environment variables are properly configured in production.
+
+---
+
+## 👨‍💻 Author
+
+Deepesh Katudia ||
+Software Developer
