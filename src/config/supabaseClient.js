@@ -6,7 +6,6 @@ function getEnv(name) {
   return v;
 }
 
-// 👇 ADD THESE TWO LINES HERE
 const SUPABASE_URL = getEnv("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = getEnv("SUPABASE_SERVICE_ROLE_KEY");
 

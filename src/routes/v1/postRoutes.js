@@ -18,11 +18,9 @@ const uploadMedia = multer({
 
 // Create a new post (JSON)
 router.post("/", async (req, res, next) => {
-  // Minimal validation (avoids validateBody crash)
   const content = typeof req.body?.content === "string" ? req.body.content : "";
   const mediaUrl = typeof req.body?.mediaUrl === "string" ? req.body.mediaUrl : "";
 
-  // Put validatedBody in the shape your controller already uses
   req.validatedBody = {
     content: content.slice(0, 2000),
     mediaUrl: mediaUrl.slice(0, 1024),
@@ -49,7 +47,6 @@ router.post("/upload-media", uploadMedia.single("media"), async (req, res) => {
       buffer: req.file.buffer,
       contentType: req.file.mimetype,
     });
-
     return res.status(201).json({ url });
   } catch (e) {
     req.logger?.error("post upload error: %o", e);

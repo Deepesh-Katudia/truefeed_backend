@@ -29,8 +29,6 @@ async function createStory({ userId, text, mediaUrl }) {
     .single();
 
   if (error) throw error;
-
-  // keep compatibility with old return
   return { insertedId: data.id, expiresAt: data.expires_at };
 }
 
@@ -41,18 +39,11 @@ async function markViewed({ storyId, viewerUserId }) {
     .insert([{ story_id: storyId, user_id: viewerUserId }]);
 
   if (!error) return;
-
   // If already viewed, ignore (duplicate key 23505)
   if (error.code === "23505") return;
-
   throw error;
 }
 
-/**
- * feedActiveByUser()
- * Mongo grouped stories by userId and joined user docs.
- * We replicate: return [{ user, latestCreatedAt, items: [...] }]
- */
 async function feedActiveByUser() {
   const nowIso = new Date().toISOString();
 
@@ -65,8 +56,7 @@ async function feedActiveByUser() {
 
   if (error) throw error;
   if (!stories || stories.length === 0) return [];
-
-  // 2) Group in JS (because PostgREST group-by is limited)
+  // 2) Group by user_id (also track latest created_at for sorting later)
   const grouped = new Map();
   for (const s of stories) {
     if (!grouped.has(s.user_id)) {
@@ -106,9 +96,6 @@ async function feedActiveByUser() {
       latestCreatedAt: g.latestCreatedAt,
       items: g.items,
     }));
-
-  // Optional: match Mongo user shape where id was _id
-  // If your controllers expect user._id, you can map it:
   for (const group of result) {
     if (group.user && group.user.id) {
       group.user._id = group.user.id;

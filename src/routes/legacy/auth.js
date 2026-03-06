@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
-// session-based authentication (no JWT issuance here)
 const { connect } = require("../config/dbConnection");
 const logger = require("../utils/logger");
 

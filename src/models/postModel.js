@@ -24,8 +24,6 @@ async function createPost({ userId, content, mediaUrl, ai }) {
     .single();
 
   if (error) throw error;
-
-  // keep similar shape to Mongo insertOne result
   return { insertedId: data.id, acknowledged: true };
 }
 
@@ -72,10 +70,8 @@ async function listUserPosts(userId) {
   for (const row of commentsAgg || []) {
     commentsCountMap.set(row.post_id, (commentsCountMap.get(row.post_id) || 0) + 1);
   }
-
-  // Return in a shape that mirrors your Mongo doc fields
   return posts.map((p) => ({
-    _id: p.id, // compatibility with controllers expecting _id
+    _id: p.id,
     userId: p.user_id,
     content: p.content,
     mediaUrl: p.media_url,
@@ -87,9 +83,9 @@ async function listUserPosts(userId) {
       updatedAt: p.ai_updated_at,
       error: p.ai_error,
     },
-    likedBy: [], // we don't return full arrays by default (same as before unless controllers depend on it)
+    likedBy: [], 
     likesCount: likesCountMap.get(p.id) || 0,
-    comments: [], // not returned here
+    comments: [], 
     commentsCount: commentsCountMap.get(p.id) || 0,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
@@ -121,19 +117,13 @@ async function likePost(postId, userId) {
   const { error } = await supabase.from("post_likes").insert([
     { post_id: postId, user_id: userId },
   ]);
-
   if (!error) return true;
-
-  // If already liked, Supabase/Postgres throws duplicate key error (23505)
-  // We treat that as "false" (no change)
   if (error.code === "23505") return false;
-
   throw error;
 }
 
 /**
  * unlikePost(postId, userId)
-
  */
 async function unlikePost(postId, userId) {
   const { data, error } = await supabase
@@ -159,7 +149,7 @@ async function addComment(postId, userId, text) {
     .single();
 
   if (error) throw error;
-  return data.id; // commentId
+  return data.id; 
 }
 
 /**

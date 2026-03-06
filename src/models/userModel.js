@@ -19,9 +19,7 @@ async function findByEmail(email) {
       console.error("Supabase query error:", error);
       throw error;
     }
-
     return data;
-
   } catch (err) {
     console.error("Supabase full error object:", err);
     throw err;
@@ -37,7 +35,6 @@ async function createUser({ name, email, passwordHash, role = "user" }) {
     ])
     .select("id,email,name,role,created_at")
     .single();
-
   if (error) throw error;
   return data;
 }
@@ -49,14 +46,12 @@ async function findById(id) {
     .select("id,email,name,role,created_at")
     .eq("id", id)
     .maybeSingle();
-
   if (error) throw error;
   return data;
 }
 
 async function updateUserById(id, updates) {
   const allowed = ["name", "picture_url", "description", "phone"];
-  // add more profile fields you support
   const safe = {};
   for (const k of allowed) {
     if (updates[k] !== undefined) safe[k] = updates[k];
@@ -74,15 +69,6 @@ async function updateUserById(id, updates) {
   return data;
 }
 
-
-/**
- * Sends a friend request: sender -> target
- * Adds:
- *  - sender.friendRequestsOutgoing += targetId
- *  - target.friendRequestsIncoming += senderId
- *
- * Returns an object describing what happened.
- */
 async function sendFriendRequest(senderId, targetId) {
   if (!senderId || !targetId) return { ok: false, code: "invalid_id" };
   if (String(senderId) === String(targetId)) return { ok: false, code: "self_request" };
@@ -119,7 +105,6 @@ async function sendFriendRequest(senderId, targetId) {
   if (error) throw error;
   return { ok: true };
 }
-
 
 // Accept Firend Request
 async function acceptFriendRequest(receiverId, senderId) {
@@ -238,9 +223,6 @@ async function searchUsers(query, { excludeUserId, limit = 10 } = {}) {
 
   return data || [];
 }
-
-
-
 
 module.exports = {
   findByEmail,

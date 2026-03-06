@@ -12,8 +12,6 @@ function requireAuth(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-
-    // normalize payload shape for rest of app
     req.user = {
       userId: String(payload.userId || payload.id || payload._id || ""),
       email: payload.email || "",
@@ -23,7 +21,6 @@ function requireAuth(req, res, next) {
     if (!req.user.userId) {
       return res.status(401).json({ error: "unauthorized" });
     }
-
     return next();
   } catch (err) {
     logger.warn("JWT verify failed: %s", err?.message || err);

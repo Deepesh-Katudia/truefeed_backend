@@ -41,13 +41,10 @@ function extractErrorMessage(e) {
   if (!e) return "upload failed";
   if (typeof e === "string") return e;
   if (e instanceof Error && e.message) return e.message;
-
-  // Supabase style: { error: { message } } or { error: "..." }
   if (e.error) {
     if (typeof e.error === "string") return e.error;
     if (e.error.message) return e.error.message;
   }
-
   if (e.message) return e.message;
   if (e.details) return e.details;
   if (e.hint) return e.hint;
@@ -89,7 +86,6 @@ router.post(
         buffer: req.file.buffer,
         contentType: req.file.mimetype,
       });
-
       return res.status(201).json({ url: publicUrl });
     } catch (e) {
       const msg = extractErrorMessage(e);
@@ -116,8 +112,6 @@ router.post(
     if (typeof req.body?.name === "string") {
       updates.name = sanitizeString(req.body.name, { maxLen: 100 });
     }
-
-    // Optional picture upload
     if (req.file) {
       try {
         const path = safeUploadPath(req.user.userId, req.file.originalname);
@@ -136,8 +130,6 @@ router.post(
         return res.status(500).json({ error: msg });
       }
     }
-
-    // Reuse controller logic
     req.validatedBody = updates;
     return profileController.updateMe(req, res);
   }

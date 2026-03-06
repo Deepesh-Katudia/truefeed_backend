@@ -21,10 +21,8 @@ async function checkAICredibility(req, res) {
       return res.status(400).json({ error: "Missing text to check" });
     }
 
-    // IMPORTANT: pass raw statement, let service do the formatting + JSON schema
+    // pass raw statement, let service do the formatting + JSON schema
     const result = await ai.checkCredibility(checkFor);
-
-    // Keep same response shape frontend expects
     return res.status(200).json({ response: result });
   } catch (error) {
     console.error("Error checking AI credibility:", error);

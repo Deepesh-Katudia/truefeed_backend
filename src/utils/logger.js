@@ -45,8 +45,6 @@ if (logDir) {
       })
     );
   } catch (e) {
-    // If directory creation fails for any reason, fall back to console only
-    // Do not crash the process
     console.warn("Logger file transport disabled:", e?.message || e);
   }
 }
@@ -63,7 +61,6 @@ const logger = createLogger({
   exitOnError: false,
 });
 
-// stream for morgan
 logger.stream = {
   write: (message) => logger.info(message.trim()),
 };

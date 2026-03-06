@@ -95,7 +95,6 @@ async function me(req, res) {
   }
 
   try {
-    // you already have getUserByEmail; keep using it
     const user = await authService.getUserByEmail(decoded.email);
     if (!user) return res.status(404).json({ error: "User not found" });
 

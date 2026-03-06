@@ -1,6 +1,3 @@
-// Lightweight validation/sanitization helpers for JSON payloads
-// Usage: attach per-route with a schema describing expected fields.
-
 function isString(v) {
   return typeof v === "string";
 }
@@ -10,7 +7,6 @@ function sanitizeString(v, { trim = true, maxLen = 2000 } = {}) {
   let s = v;
   if (trim) s = s.trim();
   if (s.length > maxLen) s = s.slice(0, maxLen);
-  // basic control-char removal (except \n, \r, \t)
   s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
   return s;
 }
@@ -44,7 +40,6 @@ function validateBody(schema) {
             trim: rules.trim !== false,
             maxLen: rules.maxLen || 2000,
           });
-          // rudimentary URL check if flagged
           if (rules.format === "url" && !/^https?:\/\//i.test(out[key])) {
             errors.push(`${key} must be an http(s) URL`);
           }
@@ -69,8 +64,6 @@ function validateBody(schema) {
     if (errors.length) {
       return res.status(400).json({ error: "validation", details: errors });
     }
-
-    // attach sanitized body for downstream usage
     req.validatedBody = out;
     next();
   };

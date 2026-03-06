@@ -73,15 +73,11 @@ SOURCES RULE:
   try {
     const resp = await client.responses.create({
       model: MODEL,
-
-      // ✅ Use the preview web search tool (most reliable for grounding)
       tools: [{ type: "web_search_preview" }],
       tool_choice: "auto",
 
       instructions,
       input: `Claim: ${text}`,
-
-      // ✅ Force strict JSON for the credibility object
       text: {
         format: {
           type: "json_schema",
@@ -90,15 +86,11 @@ SOURCES RULE:
           strict: true,
         },
       },
-
-      // ✅ Ask the API to include tool sources in the response payload
       include: ["web_search_call.action.sources"],
     });
 
     const raw = resp.output_text || "{}";
     const result = JSON.parse(raw);
-
-    // ✅ Attach real sources (from tool output)
     const sources = extractSourcesFromResponse(resp);
 
     return { ...result, sources };
