@@ -23,7 +23,13 @@ async function registerUser({ name, email, password }) {
     role: "user",
   });
 
-  return { id: created.id, email: created.email, role: created.role };
+  return {
+    id: created.id,
+    email: created.email,
+    name: created.name,
+    role: created.role,
+    created_at: created.created_at,
+  };
 }
 
 async function authenticateUser({ email, password }) {

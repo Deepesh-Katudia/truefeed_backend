@@ -12,4 +12,7 @@ router.post("/login", controller.login);
 // Logout
 router.post("/logout", controller.logout);
 
+// Current session user info
+router.get("/me", controller.me);
+
 module.exports = router;

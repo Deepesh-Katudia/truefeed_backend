@@ -1,13 +1,12 @@
 const authService = require("../services/authService");
 const logger = require("../utils/logger");
 const jwt = require("jsonwebtoken");
-const { JWT_SECRET, NODE_ENV } = require("../config/envPath");
+const { JWT_SECRET } = require("../config/envPath");
 
 function signToken(payload) {
   // keep it simple: 7 days
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 }
-console.log("JWT_SECRET loaded:", JWT_SECRET);
 
 function getBearerToken(req) {
   const h = req.headers.authorization || "";
@@ -62,7 +61,6 @@ async function login(req, res) {
   try {
     const user = await authService.authenticateUser({ email, password });
 
-    console.log("User returned from authenticateUser:", user); 
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = signToken({
@@ -71,10 +69,20 @@ async function login(req, res) {
       role: user.role || "user",
     });
 
-    return res.json({ token });
+    return res.json({
+      token,
+      user: {
+        _id: user.id,
+        id: user.id,
+        name: user.name || "",
+        email: user.email,
+        role: user.role || "user",
+        picture: user.picture_url || null,
+      },
+    });
 
   } catch (err) {
-    console.error("Login error:", err);
+    logger.error("Login controller error for %s: %o", email, err);
     return res.status(500).json({ error: err.message });
   }
 }

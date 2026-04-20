@@ -9,8 +9,8 @@ function getEnv(name) {
 const SUPABASE_URL = getEnv("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = getEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-console.log("SUPABASE_URL:", SUPABASE_URL);
-console.log("SUPABASE_SERVICE_ROLE_KEY exists:", !!SUPABASE_SERVICE_ROLE_KEY);
+console.log("Supabase URL configured:", Boolean(SUPABASE_URL));
+console.log("Supabase service role key configured:", Boolean(SUPABASE_SERVICE_ROLE_KEY));
 
 const supabase = createClient(
   SUPABASE_URL,
