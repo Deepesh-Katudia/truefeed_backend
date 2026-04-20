@@ -196,17 +196,21 @@ async function getPendingRequestSets(userId) {
 
 
 async function searchUsers(query, { excludeUserId, limit = 10 } = {}) {
-  const q = String(query || "").trim();
-  if (!q) return [];
-
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 20));
+  const q = String(query || "")
+    .trim()
+    .replace(/[%,()]/g, " ")
+    .replace(/\s+/g, " ");
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
 
   let builder = supabase
     .from("users")
-    .select("id,email,name,role,created_at,picture_url")
-    .or(`name.ilike.%${q}%,email.ilike.%${q}%`)
+    .select("id,email,name,role,created_at,updated_at,picture_url,description")
     .order("updated_at", { ascending: false })
     .limit(safeLimit);
+
+  if (q) {
+    builder = builder.or(`name.ilike.%${q}%,email.ilike.%${q}%,description.ilike.%${q}%`);
+  }
 
   if (excludeUserId) builder = builder.neq("id", excludeUserId);
 

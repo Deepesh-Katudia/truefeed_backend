@@ -87,10 +87,6 @@ async function searchUsers(req, res) {
   const q = String(req.query.q || "").trim();
   const limit = req.query.limit;
 
-  if (!q || q.length < 2) {
-    return res.status(400).json({ error: "q must be at least 2 characters" });
-  }
-
   try {
     const [friendsSet, pending] = await Promise.all([
       userModel.getFriendIds(userId),
