@@ -44,14 +44,38 @@ async function markViewed({ storyId, viewerUserId }) {
   throw error;
 }
 
-async function feedActiveByUser() {
+async function getVisibleStoryUserIds(viewerUserId) {
+  if (!viewerUserId) return null;
+
+  const { data, error } = await supabase
+    .from("friendships")
+    .select("friend_id")
+    .eq("user_id", viewerUserId);
+
+  if (error) throw error;
+
+  const ids = new Set([String(viewerUserId)]);
+  for (const row of data || []) {
+    if (row.friend_id) ids.add(String(row.friend_id));
+  }
+  return Array.from(ids);
+}
+
+async function feedActiveByUser({ viewerUserId } = {}) {
   const nowIso = new Date().toISOString();
+  const visibleUserIds = await getVisibleStoryUserIds(viewerUserId);
 
   // 1) Get active stories sorted latest first
-  const { data: stories, error } = await supabase
+  let query = supabase
     .from("stories")
     .select("id,user_id,text,media_url,media_type,created_at,expires_at")
-    .gt("expires_at", nowIso)
+    .gt("expires_at", nowIso);
+
+  if (visibleUserIds) {
+    query = query.in("user_id", visibleUserIds);
+  }
+
+  const { data: stories, error } = await query
     .order("created_at", { ascending: false });
 
   if (error) throw error;

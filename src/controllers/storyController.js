@@ -60,7 +60,7 @@ async function feed(req, res) {
   if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
   try {
-    const groups = await storyModel.feedActiveByUser();
+    const groups = await storyModel.feedActiveByUser({ viewerUserId: userId });
     return res.json({ users: groups });
   } catch (e) {
     req.logger?.error("Stories feed error: %o", e);
