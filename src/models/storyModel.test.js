@@ -53,8 +53,18 @@ test("feedActiveByUser only returns active stories for the viewer and friends", 
     },
   ];
   const users = [
-    { id: "viewer-1", email: "viewer@example.com", name: "Viewer" },
-    { id: "friend-1", email: "friend@example.com", name: "Friend" },
+    {
+      id: "viewer-1",
+      email: "viewer@example.com",
+      name: "Viewer",
+      picture_url: "https://cdn.example.com/viewer.jpg",
+    },
+    {
+      id: "friend-1",
+      email: "friend@example.com",
+      name: "Friend",
+      picture_url: "https://cdn.example.com/friend.jpg",
+    },
   ];
 
   const storiesBuilder = {
@@ -131,5 +141,9 @@ test("feedActiveByUser only returns active stories for the viewer and friends", 
   assert.deepEqual(
     groups.map((group) => group.user._id),
     ["viewer-1", "friend-1"]
+  );
+  assert.deepEqual(
+    groups.map((group) => group.user.picture),
+    ["https://cdn.example.com/viewer.jpg", "https://cdn.example.com/friend.jpg"]
   );
 });

@@ -123,6 +123,7 @@ async function feedActiveByUser({ viewerUserId } = {}) {
   for (const group of result) {
     if (group.user && group.user.id) {
       group.user._id = group.user.id;
+      group.user.picture = group.user.picture || group.user.picture_url || null;
     }
   }
 
